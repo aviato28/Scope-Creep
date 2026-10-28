@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scope Creep: Mockup 01, Phosphor Classic</title>
+<style>
+  /* Direction A: dark scope, thin green vector lines, amber for attention. */
+  :root {
+    --bg: #05090a;
+    --panel: #0a1214;
+    --line: #1f5a3a;        /* dim linework: aprons, markings */
+    --line-hi: #39d98a;     /* active linework: runways */
+    --taxi: #2a7d57;
+    --text: #9af0c0;
+    --text-dim: #4f8f6e;
+    --amber: #ffb43a;
+    --red: #ff5a4d;
+    --cyan: #5fd0e8;
+    --font: "IBM Plex Mono", "DejaVu Sans Mono", "Roboto Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); }
+  .app { display: grid; grid-template-columns: 1fr 320px; grid-template-rows: 36px 1fr 28px; height: 100vh; min-height: 560px; }
+  header, footer { grid-column: 1 / -1; display: flex; align-items: center; gap: 22px; padding: 0 14px;
+    background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; letter-spacing: .06em; }
+  footer { border-top: 1px solid var(--line); border-bottom: 0; color: var(--text-dim); font-size: 11px; }
+  header b { color: var(--amber); font-weight: 600; }
+  .spacer { flex: 1; }
+  .scope { position: relative; overflow: hidden; }
+  .scope svg { width: 100%; height: 100%; display: block; }
+  .bay { background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+  .bay h2 { margin: 0; padding: 7px 10px; font-size: 11px; letter-spacing: .12em; color: var(--text-dim); border-bottom: 1px solid var(--line); font-weight: 500; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs div { flex: 1; text-align: center; padding: 8px 0; font-size: 11px; color: var(--text-dim); border-right: 1px solid var(--line); }
+  .tabs div:last-child { border-right: 0; }
+  .tabs .on { color: var(--bg); background: var(--text); }
+  .strips { flex: 1; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .strip { display: grid; grid-template-columns: 6px 1fr auto; min-height: 52px; background: #0d1a1c; border: 1px solid var(--line); }
+  .strip .k { background: var(--line-hi); }
+  .strip.dep .k { background: var(--amber); }
+  .strip.hold .k { background: var(--red); }
+  .strip .m { padding: 5px 8px; }
+  .strip .cs { font-size: 15px; font-weight: 600; letter-spacing: .04em; }
+  .strip .sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  .strip .r { padding: 5px 8px; text-align: right; font-size: 11px; color: var(--text-dim); border-left: 1px dashed var(--line); min-width: 74px; }
+  .strip .r b { display: block; color: var(--text); font-size: 13px; }
+  .strip.sel { outline: 2px solid var(--cyan); }
+  .strip.sel .cs { color: var(--cyan); }
+  .strip.hold .r b { color: var(--red); }
+  .menu { border-top: 1px solid var(--line); padding: 8px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .menu div { padding: 12px 0; text-align: center; font-size: 11px; border: 1px solid var(--taxi); color: var(--text); }
+  .menu .go { background: #123a28; border-color: var(--line-hi); }
+  .menu .warn { border-color: var(--amber); color: var(--amber); }
+  /* SVG text */
+  .rwy-label { fill: var(--line-hi); font-size: 15px; font-weight: 600; }
+  .twy-label { fill: var(--amber); font-size: 11px; font-weight: 600; }
+  .dim-label { fill: var(--text-dim); font-size: 10px; }
+  .db { font-size: 10.5px; fill: var(--text); }
+  .db .cs { font-weight: 700; font-size: 11.5px; }
+  .note { position: absolute; left: 12px; bottom: 10px; font-size: 10px; color: var(--text-dim); max-width: 420px; line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <b>VOBL</b><span>BENGALURU / KEMPEGOWDA</span>
+    <span>TWR GND</span>
+    <span class="spacer"></span>
+    <span>RWY IN USE 09L / 09R</span>
+    <span>QNH 1012</span>
+    <span>WIND 080/08</span>
+    <span>VIS 6000 / RAIN</span>
+    <span>SCORE <b>2,840</b></span>
+    <span>STRIKES ●○○</span>
+    <span>09:41:27Z</span>
+  </header>
+
+  <div class="scope">
+    <svg viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Schematic ground scope of VOBL">
+      <defs>
+        <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+          <path d="M50 0H0V50" fill="none" stroke="#0d1c1a" stroke-width="1"/>
+        </pattern>
+        <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0 0L10 5L0 10z" fill="#5fd0e8"/>
+        </marker>
+      </defs>
+      <rect width="1000" height="640" fill="url(#grid)"/>
+
+      <!-- RUNWAYS (schematic; not survey geometry) -->
+      <g stroke="var(--line-hi)" fill="#07130f" stroke-width="1.4">
+        <rect x="60" y="100" width="880" height="26"/>
+        <rect x="60" y="514" width="880" height="26"/>
+      </g>
+      <g stroke="var(--line)" stroke-width="1" stroke-dasharray="14 10">
+        <line x1="110" y1="113" x2="890" y2="113"/>
+        <line x1="110" y1="527" x2="890" y2="527"/>
+      </g>
+      <!-- thresholds -->
+      <g stroke="var(--line-hi)" stroke-width="2">
+        <line x1="72" y1="102" x2="72" y2="124"/><line x1="928" y1="102" x2="928" y2="124"/>
+        <line x1="72" y1="516" x2="72" y2="538"/><line x1="928" y1="516" x2="928" y2="538"/>
+      </g>
+      <text class="rwy-label" x="22" y="118">09R</text><text class="rwy-label" x="948" y="118">27L</text>
+      <text class="rwy-label" x="22" y="532">09L</text><text class="rwy-label" x="948" y="532">27R</text>
+
+      <!-- PARALLEL TAXIWAYS (placeholder designators) -->
+      <g stroke="var(--taxi)" stroke-width="3" fill="none" stroke-linecap="round">
+        <line x1="90" y1="172" x2="910" y2="172"/>
+        <line x1="90" y1="468" x2="910" y2="468"/>
+        <!-- connectors -->
+        <path d="M170 126V172M390 126V172M690 126V172M860 126V172"/>
+        <path d="M170 514V468M390 514V468M690 514V468M860 514V468"/>
+        <!-- links into apron area -->
+        <path d="M300 172V230M300 468V410M620 172V230M620 468V410"/>
+      </g>
+      <text class="twy-label" x="96" y="164">A</text><text class="twy-label" x="96" y="490">B</text>
+      <text class="twy-label" x="176" y="150">A1</text><text class="twy-label" x="396" y="150">A3</text>
+      <text class="twy-label" x="696" y="150">A5</text><text class="twy-label" x="866" y="150">A7</text>
+      <text class="twy-label" x="176" y="498">B1</text><text class="twy-label" x="396" y="498">B3</text>
+      <text class="twy-label" x="696" y="498">B5</text><text class="twy-label" x="866" y="498">B7</text>
+
+      <!-- HOLD-SHORT BARS -->
+      <g stroke="var(--amber)" stroke-width="2.4">
+        <line x1="161" y1="136" x2="179" y2="136"/><line x1="381" y1="136" x2="399" y2="136"/>
+        <line x1="681" y1="136" x2="699" y2="136"/><line x1="851" y1="136" x2="869" y2="136"/>
+        <line x1="161" y1="504" x2="179" y2="504"/><line x1="381" y1="504" x2="399" y2="504"/>
+        <line x1="681" y1="504" x2="699" y2="504"/><line x1="851" y1="504" x2="869" y2="504"/>
+      </g>
+
+      <!-- TERMINAL / APRON -->
+      <g stroke="var(--line)" fill="#071312" stroke-width="1.2">
+        <rect x="250" y="230" width="460" height="180"/>
+      </g>
+      <rect x="330" y="288" width="300" height="64" fill="#0c1f1c" stroke="var(--line-hi)" stroke-width="1"/>
+      <text class="dim-label" x="480" y="324" text-anchor="middle" letter-spacing="3">TERMINAL (SCHEMATIC)</text>
+      <!-- stands -->
+      <g stroke="var(--line)" stroke-width="1" fill="none">
+        <rect x="262" y="240" width="26" height="40"/><rect x="294" y="240" width="26" height="40"/>
+        <rect x="326" y="240" width="26" height="40"/><rect x="358" y="240" width="26" height="40"/>
+        <rect x="390" y="240" width="26" height="40"/><rect x="422" y="240" width="26" height="40"/>
+        <rect x="454" y="240" width="26" height="40"/><rect x="486" y="240" width="26" height="40"/>
+        <rect x="262" y="360" width="26" height="40"/><rect x="294" y="360" width="26" height="40"/>
+        <rect x="326" y="360" width="26" height="40"/><rect x="358" y="360" width="26" height="40"/>
+        <rect x="390" y="360" width="26" height="40"/><rect x="422" y="360" width="26" height="40"/>
+        <rect x="454" y="360" width="26" height="40"/><rect x="486" y="360" width="26" height="40"/>
+      </g>
+      <text class="dim-label" x="266" y="236">21</text><text class="dim-label" x="394" y="236">25</text><text class="dim-label" x="490" y="236">29</text>
+      <text class="dim-label" x="266" y="420">41</text><text class="dim-label" x="394" y="420">45</text><text class="dim-label" x="490" y="420">49</text>
+
+      <!-- CLEARED TAXI ROUTE for IGO512 (drag-to-route result) -->
+      <path d="M332 262 V190 Q332 172 350 172 H370 Q390 172 390 150 V136"
+            fill="none" stroke="#5fd0e8" stroke-width="2.4" stroke-dasharray="7 5" marker-end="url(#arr)"/>
+      <circle cx="390" cy="136" r="9" fill="none" stroke="var(--amber)" stroke-width="1.5"/>
+
+      <!-- TARGETS and DATA BLOCKS -->
+      <!-- selected: IGO512, pushed back, taxiing via A to hold A3 -->
+      <g>
+        <path d="M332 262 l-5 8 h10 z" fill="#5fd0e8" transform="rotate(0 332 266)"/>
+        <line x1="332" y1="262" x2="262" y2="205" stroke="#5fd0e8" stroke-width=".8"/>
+        <g class="db" transform="translate(150 150)">
+          <rect x="0" y="0" width="112" height="52" fill="#08191a" stroke="#5fd0e8" stroke-width="1"/>
+          <text class="cs" x="5" y="14" fill="#5fd0e8">IGO512</text>
+          <text x="5" y="27">A321 M</text>
+          <text x="5" y="40">TAXI A &gt; A3</text>
+          <text x="80" y="40" fill="var(--amber)">09R</text>
+        </g>
+      </g>
+      <!-- departure holding short A5 (conflict risk) -->
+      <g>
+        <path d="M690 150 l-5 -9 h10 z" fill="var(--amber)"/>
+        <line x1="690" y1="144" x2="740" y2="80" stroke="var(--amber)" stroke-width=".8"/>
+        <g class="db" transform="translate(740 28)">
+          <rect x="0" y="0" width="112" height="52" fill="#08191a" stroke="var(--amber)" stroke-width="1"/>
+          <text class="cs" x="5" y="14" fill="var(--amber)">AIC808</text>
+          <text x="5" y="27">B788 H</text>
+          <text x="5" y="40">HOLD SHORT 09R</text>
+        </g>
+      </g>
+      <!-- arrival vacating, on runway -->
+      <g>
+        <path d="M560 113 l-9 -4 v8 z" fill="var(--text)"/>
+        <line x1="552" y1="108" x2="520" y2="70" stroke="var(--text)" stroke-width=".8"/>
+        <g class="db" transform="translate(436 22)">
+          <rect x="0" y="0" width="112" height="52" fill="#08191a" stroke="var(--line-hi)" stroke-width="1"/>
+          <text class="cs" x="5" y="14">AKJ213</text>
+          <text x="5" y="27">B38M M</text>
+          <text x="5" y="40">VACATE A5</text>
+          <text x="82" y="40" fill="var(--line-hi)">LDG</text>
+        </g>
+      </g>
+      <!-- south side: pushback, line-up -->
+      <g>
+        <path d="M412 380 l-5 8 h10 z" fill="var(--text)"/>
+        <line x1="412" y1="388" x2="440" y2="430" stroke="var(--text)" stroke-width=".8"/>
+        <g class="db" transform="translate(440 560)">
+          <rect x="0" y="-130" width="112" height="52" fill="#08191a" stroke="var(--line)" stroke-width="1"/>
+          <text class="cs" x="5" y="-116">AXB339</text>
+          <text x="5" y="-103">B738 M</text>
+          <text x="5" y="-90">PUSH ST41</text>
+        </g>
+      </g>
+      <g>
+        <path d="M200 527 l9 -4 v8 z" fill="var(--amber)" transform="rotate(180 200 527)"/>
+        <line x1="205" y1="527" x2="250" y2="580" stroke="var(--amber)" stroke-width=".8"/>
+        <g class="db" transform="translate(180 580)">
+          <rect x="0" y="0" width="128" height="52" fill="#08191a" stroke="var(--amber)" stroke-width="1"/>
+          <text class="cs" x="5" y="14" fill="var(--amber)">UAE569</text>
+          <text x="5" y="27">A388 J</text>
+          <text x="5" y="40">LINE UP 09L</text>
+        </g>
+      </g>
+      <g>
+        <path d="M780 468 l-5 8 h10 z" fill="var(--text)" transform="rotate(90 780 470)"/>
+        <line x1="784" y1="470" x2="800" y2="430" stroke="var(--text)" stroke-width=".8"/>
+        <g class="db" transform="translate(800 380)">
+          <rect x="0" y="0" width="112" height="52" fill="#08191a" stroke="var(--line)" stroke-width="1"/>
+          <text class="cs" x="5" y="14">SEJ447</text>
+          <text x="5" y="27">B737 M</text>
+          <text x="5" y="40">TAXI B &gt; B7</text>
+        </g>
+      </g>
+    </svg>
+    <div class="note">MOCKUP 01 · PHOSPHOR CLASSIC · Schematic layout only; stand and taxiway IDs are placeholders, not VOBL survey data. Airline designators, callsign formats and telephony to be verified against ICAO Doc 8585 / airline data. Not for navigation.</div>
+  </div>
+
+  <aside class="bay">
+    <h2>FLIGHT STRIP BAY</h2>
+    <div class="tabs"><div>CLR</div><div>PUSH</div><div class="on">TAXI</div><div>RWY</div></div>
+    <div class="strips">
+      <div class="strip dep sel"><div class="k"></div><div class="m"><div class="cs">IGO512</div><div class="sub">A321 · VOBL→VIDP · ST25</div></div><div class="r">DEP 09R<b>A3</b></div></div>
+      <div class="strip dep hold"><div class="k"></div><div class="m"><div class="cs">AIC808</div><div class="sub">B788 · VOBL→EGLL · ST18</div></div><div class="r">HOLD SHORT<b>A5</b></div></div>
+      <div class="strip dep"><div class="k"></div><div class="m"><div class="cs">UAE569</div><div class="sub">A388 · VOBL→OMDB · ST44</div></div><div class="r">LINE UP<b>09L</b></div></div>
+      <div class="strip"><div class="k"></div><div class="m"><div class="cs">AKJ213</div><div class="sub">B38M · VABB→VOBL</div></div><div class="r">VACATE<b>A5</b></div></div>
+      <div class="strip dep"><div class="k"></div><div class="m"><div class="cs">SEJ447</div><div class="sub">B737 · VOBL→VAAH · ST47</div></div><div class="r">TAXI<b>B7</b></div></div>
+      <div class="strip dep"><div class="k"></div><div class="m"><div class="cs">AXB339</div><div class="sub">B738 · VOBL→VOCI · ST41</div></div><div class="r">PUSH<b>FACE E</b></div></div>
+    </div>
+    <div class="menu">
+      <div>TAXI</div><div>HOLD SHORT</div><div>CROSS RWY</div>
+      <div class="go">LINE UP</div><div class="go">TKOF</div><div class="warn">GO AROUND</div>
+    </div>
+  </aside>
+
+  <footer>
+    <span>FREQ 121.900</span><span>LOG &gt; IGO512 TAXI VIA A TO HOLD SHORT RWY 09R AT A3, READ BACK</span><span class="spacer"></span><span>NEXT DEP SLOT 09R: 00:48</span>
+  </footer>
+</div>
+</body>
+</html>
