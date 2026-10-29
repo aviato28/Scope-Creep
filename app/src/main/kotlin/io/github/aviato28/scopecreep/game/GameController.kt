@@ -3,6 +3,7 @@ package io.github.aviato28.scopecreep.game
 import android.graphics.Path
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.github.aviato28.scopecreep.scope.Camera
 import io.github.aviato28.scopecreep.scope.ScopeScene
@@ -10,7 +11,7 @@ import io.github.aviato28.scopecreep.sim.*
 import io.github.aviato28.scopecreep.sim.routing.*
 import kotlin.math.hypot
 
-enum class Mode { IDLE, DEST, ROUTES, BUILD }
+enum class Mode { IDLE, DEST, ROUTES, BUILD, PUSH }
 
 /** Owns the Simulation, drives it from the frame clock and holds the tap-to-route UI state (D12). */
 class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMillis()) {
@@ -22,6 +23,20 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     var frame by mutableIntStateOf(0); private set
     var timeSec = 0f; private set
     private var lastSimRev = -1
+
+    /** Game speed 1/2/4; drops to 1 when something needs attention if [autoDrop] (default on). */
+    var speed by mutableIntStateOf(1); private set
+    var autoDrop = true
+    private var lastAttention = 0
+    /** Ticks once per sim second; strips (waiting time, order) re-read it. */
+    var secRev by mutableIntStateOf(0); private set
+    private var lastSec = -1
+    /** Strips ordered by urgency; rebuilt once per sim second and on discrete changes. */
+    var strips: List<Aircraft> = emptyList(); private set
+    var pushOptions: List<PushOption> = emptyList(); private set
+
+    fun cycleSpeed() { applySpeed(when (speed) { 1 -> 2; 2 -> 4; else -> 1 }) }
+    private fun applySpeed(s: Int) { speed = s; sim.timeScale = s.toDouble() }
 
     var selectedId = -1; private set
     var mode = Mode.IDLE; private set
@@ -60,16 +75,36 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         stats(nanos)
         nowNanos = nanos; timeSec = nanos / 1e9f
         sim.update()
+        if (sim.attention != lastAttention) { lastAttention = sim.attention; if (autoDrop && speed != 1) applySpeed(1) }
+        var changed = false
         if (sim.revision != lastSimRev) {
             lastSimRev = sim.revision
             val a = selected
-            if (a == null) { selectedId = -1; reset() } else if (mode != Mode.IDLE && a.state != (if (amend) a.state.takeIf { it == AcState.TAXIING || it == AcState.HOLDING_SHORT } else AcState.REQUEST_TAXI)) reset()
-            bump()
+            val want = if (mode == Mode.PUSH) AcState.REQUEST_PUSH else if (amend) a?.state?.takeIf { it == AcState.TAXIING || it == AcState.HOLDING_SHORT } else AcState.REQUEST_TAXI
+            if (a == null) { selectedId = -1; reset() } else if (mode != Mode.IDLE && a.state != want) reset()
+            bump(); changed = true
         }
+        val sec = sim.time.toInt()
+        if (changed || sec != lastSec) { lastSec = sec; rebuildStrips(); secRev++ }
         frame++
     }
 
     private fun bump() { rev++ }
+
+    private fun rank(a: Aircraft) = when {
+        a.conflictWith != 0 -> 0
+        a.waitState != null -> 1
+        a.state == AcState.TAXIING -> 2
+        a.state == AcState.PUSHING -> 3
+        a.state == AcState.TAKEOFF_ROLL -> 4
+        a.state == AcState.AT_STAND -> 5
+        else -> 6
+    }
+
+    private fun rebuildStrips() {
+        val t = sim.time
+        strips = sim.aircraft.sortedWith(compareBy<Aircraft>({ rank(it) }, { -(if (it.waitSince >= 0) t - it.waitSince else 0.0) }, { it.id }))
+    }
 
     private fun reset() { mode = Mode.IDLE; amend = false; dest = null; routes = emptyList(); build = null; buildOptions = emptyList(); previewText = ""; hasSel = false; hasDim1 = false; hasDim2 = false; hasBuild = false }
 
@@ -79,7 +114,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     fun instruct(k: InstructionKind) {
         val a = selected ?: return
         when (k) {
-            InstructionKind.PUSHBACK -> sim.submit(PushbackApproved(a.id))
+            InstructionKind.PUSHBACK -> { pushOptions = sim.pushOptions(a); mode = Mode.PUSH }
             InstructionKind.TAXI -> { amend = false; destList = sim.destinations; mode = Mode.DEST }
             InstructionKind.AMEND_ROUTE -> { amend = true; destList = sim.amendDestinations(a); mode = Mode.DEST }
             InstructionKind.HOLD_POSITION -> sim.submit(HoldPosition(a.id))
@@ -88,6 +123,11 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
             InstructionKind.TAKEOFF -> sim.submit(ClearedForTakeoff(a.id))
         }
         bump()
+    }
+
+    fun choosePush(o: PushOption) {
+        val a = selected ?: return
+        sim.submit(PushbackApproved(a.id, o.edge)); reset(); bump()
     }
 
     fun chooseDest(d: Destination) {
@@ -117,7 +157,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         when (mode) {
             Mode.BUILD -> { mode = Mode.ROUTES; build = null; hasBuild = false; previewText = textFor(routes.getOrNull(routeIdx)?.refs, false) }
             Mode.ROUTES -> { mode = Mode.DEST; routes = emptyList(); dest = null; hasSel = false; hasDim1 = false; hasDim2 = false; previewText = "" }
-            Mode.DEST -> mode = Mode.IDLE
+            Mode.DEST, Mode.PUSH -> mode = Mode.IDLE
             Mode.IDLE -> {}
         }
         bump()

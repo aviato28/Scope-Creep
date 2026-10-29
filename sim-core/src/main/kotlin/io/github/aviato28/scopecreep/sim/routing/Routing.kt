@@ -52,13 +52,13 @@ class Router(val g: TaxiGraph) {
     // ---- suggestions --------------------------------------------------------------------------
 
     /** Up to 3 distinct (by ref sequence) routes from [from] to [dest], shortest first and flagged FASTEST. */
-    fun suggestRoutes(from: Int, dest: Destination, max: Int = 3, ban: Int = -1): List<Route> {
+    fun suggestRoutes(from: Int, dest: Destination, max: Int = 3, ban: Int = -1, bans: Set<Int> = emptySet()): List<Route> {
         if (from == dest.node) return emptyList()
         val used = HashMap<Int, Int>()
         val found = ArrayList<Route>()
         val seen = HashSet<List<String>>()
         for (attempt in 0 until 10) {
-            val r = g.search(from, { e -> if (e.idx == ban) Double.POSITIVE_INFINITY else e.length * (1.0 + 0.7 * (used[e.idx] ?: 0)) }, leafOk = dest.node)
+            val r = g.search(from, { e -> if (e.idx == ban || e.idx in bans) Double.POSITIVE_INFINITY else e.length * (1.0 + 0.7 * (used[e.idx] ?: 0)) }, leafOk = dest.node)
             val p = g.pathTo(r, from, dest.node) ?: break
             val route = routeOf(p.first, p.second, dest)
             if (seen.add(route.refs)) found += route
@@ -89,14 +89,14 @@ class Router(val g: TaxiGraph) {
     }
 
     /** Taxiway refs reachable from [current] (last node of [routeSoFar]) in one hop, best (closest to [dest]) first. */
-    fun legalNextRefs(current: Int, routeSoFar: List<Int>, dest: Destination?, ban: Int = -1): List<BuildOption> {
+    fun legalNextRefs(current: Int, routeSoFar: List<Int>, dest: Destination?, ban: Int = -1, bans: Set<Int> = emptySet()): List<BuildOption> {
         val prevNode = if (routeSoFar.size >= 2 && routeSoFar.last() == current) routeSoFar[routeSoFar.size - 2] else -1
         val prevEdge = if (prevNode >= 0) g.edgeBetween(prevNode, current) else -1
         val curRef = if (routeSoFar.size >= 2) compressNodes(routeSoFar).lastOrNull() else null
         val dist = dest?.let { distTo(it.node) }
         val groups = LinkedHashMap<String, MutableList<BuildOption>>()
         for (ei in g.adj[current]) {
-            if (ei == prevEdge || ei == ban) continue
+            if (ei == prevEdge || ei == ban || (routeSoFar.size == 1 && ei in bans)) continue
             val e = g.edges[ei]; val t = g.other(e, current)
             if (t in routeSoFar) continue
             if (g.isLeaf(t) && (dest == null || t != dest.node)) continue
@@ -130,12 +130,12 @@ class Router(val g: TaxiGraph) {
 }
 
 /** BUILD mode state: tap a ref chip, the route grows to the next junction; UNDO pops the last step. */
-class BuildSession(private val router: Router, start: Int, val dest: Destination, private val ban: Int = -1) {
+class BuildSession(private val router: Router, start: Int, val dest: Destination, private val ban: Int = -1, private val bans: Set<Int> = emptySet()) {
     val nodes = ArrayList<Int>().apply { add(start) }
     private val marks = ArrayList<Int>()
     val current get() = nodes.last()
     val complete get() = current == dest.node
-    fun options(): List<BuildOption> = if (complete) emptyList() else router.legalNextRefs(current, nodes, dest, ban)
+    fun options(): List<BuildOption> = if (complete) emptyList() else router.legalNextRefs(current, nodes, dest, ban, bans)
     fun apply(opt: BuildOption) { marks += nodes.size; router.applyRef(nodes, opt, dest) }
     fun canUndo() = marks.isNotEmpty()
     fun undo() { if (marks.isNotEmpty()) { val m = marks.removeAt(marks.size - 1); while (nodes.size > m) nodes.removeAt(nodes.size - 1) } }

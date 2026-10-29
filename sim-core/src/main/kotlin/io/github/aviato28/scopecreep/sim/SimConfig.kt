@@ -13,7 +13,18 @@ data class SimConfig(
     val requestTaxiDelayMin: Double = 3.0, val requestTaxiDelayMax: Double = 6.0,
     val readyForDepartureDelay: Double = 8.0,
     val readbackDelay: Double = 1.5,
-    val nextSpawnDelayMin: Double = 4.0, val nextSpawnDelayMax: Double = 8.0,
+
+    // traffic ramp (departures only): pressure 0.5 at 10 min, 1.0 at 25 min
+    val pressureHalfAtS: Double = 600.0, val pressureFullAtS: Double = 1500.0,
+    val spawnIntervalAt0: Double = 150.0, val spawnIntervalAt1: Double = 35.0, val spawnJitter: Double = 0.3,
+    val spawnRetryS: Double = 10.0,
+    /** Pilot re-calls an ignored request after this long, then every this long again. */
+    val recallSeconds: Double = 60.0,
+    // separation
+    val spacingM: Double = 60.0, val lateralM: Double = 14.0, val scanAheadM: Double = 140.0,
+    /** Max angle between the facing after pushback and the first taxi edge (more is a U-turn, not allowed in v1). */
+    val maxFirstTurnDeg: Double = 100.0,
+    val maxStepsPerUpdate: Int = 60,
 
     // movement (m/s, m/s^2)
     val taxiSpeed: Double = 7.7,       // 15 kt on straights

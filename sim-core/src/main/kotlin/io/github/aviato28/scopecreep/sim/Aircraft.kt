@@ -11,7 +11,8 @@ enum class InstructionKind(val label: String) {
 }
 
 sealed interface Command { val aircraftId: Int }
-data class PushbackApproved(override val aircraftId: Int) : Command
+/** [faceEdge] is the graph edge the nose will point along after the push (see [Simulation.pushOptions]); -1 picks a default. */
+data class PushbackApproved(override val aircraftId: Int, val faceEdge: Int = -1) : Command
 data class Taxi(override val aircraftId: Int, val route: Route) : Command
 data class AmendRoute(override val aircraftId: Int, val route: Route) : Command
 data class HoldPosition(override val aircraftId: Int) : Command
@@ -19,7 +20,10 @@ data class Continue(override val aircraftId: Int) : Command
 data class LineUpAndWait(override val aircraftId: Int) : Command
 data class ClearedForTakeoff(override val aircraftId: Int) : Command
 
-class RadioLine(val time: Double, val fromAtc: Boolean, val text: String)
+class RadioLine(val time: Double, val fromAtc: Boolean, val text: String, val warn: Boolean = false)
+
+/** One pushback choice: nose ends up facing [heading] along graph edge [edge]; [label] is its 8-point compass name. */
+class PushOption(val edge: Int, val heading: Double, val label: String, val ref: String)
 
 class Aircraft(
     val id: Int, val airline: Airline, val number: Int, val type: AircraftType,
@@ -54,6 +58,19 @@ class Aircraft(
     var airborneAt = 0.0
     var pushSpeed = 1.0
     var instruction = ""
+
+    var spot = -1
+    /** Edges the first taxi leg may not use (would need a U-turn after pushback). */
+    var noEdges: Set<Int> = emptySet()
+    var pushHeading0 = 0.0; var pushHeading1 = 0.0
+    /** Head-on partner id (0 = none) and the free distance ahead before spacing is lost (scratch, recomputed each step). */
+    var conflictWith = 0
+    var prevConflict = 0
+    var gapAllow = Double.POSITIVE_INFINITY
+    /** State in which the pilot is waiting for ATC, since when, and when the next re-call is due. */
+    var waitState: AcState? = null
+    var waitSince = -1.0
+    var recallAt = 0.0
 
     fun interpX(a: Double) = prevX + (x - prevX) * a
     fun interpY(a: Double) = prevY + (y - prevY) * a

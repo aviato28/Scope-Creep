@@ -134,7 +134,7 @@ class VoblSimTest {
         val (trace, sim) = run(42)
         println(trace.joinToString("\n")); sim.log.forEach { println("%.1f %s %s".format(it.time, if (it.fromAtc) "ATC  " else "PILOT", it.text)) }
         assertEquals(1, sim.departed)
-        val states = trace.map { it.split(' ')[2] }
+        val states = trace.filter { it.split(' ')[1] == trace.first { l -> l.endsWith("AIRBORNE") }.split(' ')[1] }.map { it.split(' ')[2] }
         assertEquals(AcState.values().map { it.name }, states)
         assertTrue(sim.log.any { it.text.contains("taxi") && it.text.contains("holding point") })
     }

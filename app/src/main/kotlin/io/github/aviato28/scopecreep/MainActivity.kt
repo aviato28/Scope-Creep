@@ -96,7 +96,7 @@ private fun ScopeApp() {
     BackHandler(credits) { credits = false }
     Box(Modifier.fillMaxSize().background(bg).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
     Column(Modifier.fillMaxSize()) {
-        StatusBar(scene, theme, updateState is io.github.aviato28.scopecreep.update.UpdateState.Available) { credits = true }
+        StatusBar(scene, game, theme, updateState is io.github.aviato28.scopecreep.update.UpdateState.Available) { credits = true }
         val wide = LocalConfiguration.current.screenWidthDp >= 840
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -123,7 +123,7 @@ private fun ScopeApp() {
 }
 
 @Composable
-private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, updateAvailable: Boolean, onInfo: () -> Unit) {
+private fun StatusBar(scene: ScopeScene?, game: GameController?, theme: ScopeTheme, updateAvailable: Boolean, onInfo: () -> Unit) {
     val meta = scene?.airport?.meta
     val clock by produceState("--:--:--Z") {
         val f = DateTimeFormatter.ofPattern("HH:mm:ss'Z'")
@@ -132,7 +132,7 @@ private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, updateAvailable: Bo
     val title = meta?.name?.uppercase()?.removeSuffix(" INTERNATIONAL")?.replaceFirst(" ", " / ") ?: ""
     val st = TextStyle(Color(theme.text), 11.sp, fontFamily = Mono)
     Row(
-        Modifier.fillMaxWidth().background(Color(theme.panel)).padding(horizontal = 14.dp, vertical = 4.dp),
+        Modifier.fillMaxWidth().background(Color(theme.panel)).padding(horizontal = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -147,6 +147,17 @@ private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, updateAvailable: Bo
                 style = st.copy(Color(theme.selected), 10.sp, fontWeight = FontWeight.Bold),
             )
             BasicText(clock, style = st)
+            if (game != null) {
+                val sp = game.speed
+                val col = Color(if (sp > 1) theme.selected else theme.text)
+                Column(
+                    Modifier.size(width = 64.dp, height = 48.dp).clickable { game.cycleSpeed() },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    BasicText("SPEED", style = st.copy(Color(theme.dim), 8.sp))
+                    BasicText("${sp}X", Modifier.border(if (sp > 1) 2.dp else 1.dp, col).padding(horizontal = 8.dp, vertical = 1.dp), style = st.copy(col, 14.sp, fontWeight = FontWeight.Bold))
+                }
+            }
             // Visible box stays 28dp; the tap area is wider so it is easy to hit without growing the bar.
             Box(Modifier.size(width = 48.dp, height = 36.dp).clickable(onClick = onInfo), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(28.dp).border(1.dp, Color(theme.dim)), contentAlignment = Alignment.Center) {

@@ -20,6 +20,7 @@ import io.github.aviato28.scopecreep.game.GameController
 import io.github.aviato28.scopecreep.game.Mode
 import io.github.aviato28.scopecreep.sim.AcState
 import io.github.aviato28.scopecreep.sim.Aircraft
+import io.github.aviato28.scopecreep.sim.InstructionKind
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 
 private val Mono = FontFamily.Monospace
@@ -55,6 +56,13 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                     val legal = g.sim.legalInstructions(a)
                     if (legal.isEmpty()) BasicText(a.instruction, style = TextStyle(Color(t.dim), 12.sp, fontFamily = Mono))
                     for (k in legal) Chip(t, k.label, accent = true) { g.instruct(k) }
+                    if ((a.state == AcState.HOLDING_SHORT || a.state == AcState.LINED_UP) && InstructionKind.TAKEOFF !in legal && !a.armedTakeoff)
+                        BasicText("RUNWAY OCCUPIED", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.warn), 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                }
+                Mode.PUSH -> {
+                    BasicText("PUSH", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
+                    for (o in g.pushOptions) Chip(t, "FACE ${o.label}", o.ref.ifEmpty { null }, accent = true) { g.choosePush(o) }
+                    Chip(t, "X") { g.back() }
                 }
                 Mode.DEST -> {
                     BasicText("TAXI TO", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
@@ -86,7 +94,7 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
 @Composable
 fun PreviewBanner(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     g.rev
-    val text = when (g.mode) { Mode.DEST -> if (g.amend) "AMEND ROUTE: PICK A HOLD" else "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
+    val text = when (g.mode) { Mode.PUSH -> "PUSHBACK: PICK FACING"; Mode.DEST -> if (g.amend) "AMEND ROUTE: PICK A HOLD" else "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
     if (text.isEmpty()) return
     BasicText(text, modifier.background(Color(t.panel)).border(1.dp, Color(t.selected)).padding(horizontal = 10.dp, vertical = 5.dp),
         style = TextStyle(Color(t.selected), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
@@ -102,7 +110,7 @@ fun RadioLog(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
         for (i in maxOf(0, log.size - 3) until log.size) {
             val l = log[i]; val m = (l.time / 60).toInt(); val s = (l.time % 60).toInt()
             BasicText("%02d:%02d %s %s".format(m, s, if (l.fromAtc) "GND" else "ACFT", l.text),
-                style = TextStyle(Color(if (l.fromAtc) t.text else t.departure), 10.sp, fontFamily = Mono))
+                style = TextStyle(Color(if (l.warn) t.warn else if (l.fromAtc) t.text else t.departure), 10.sp, fontFamily = Mono, fontWeight = if (l.warn) FontWeight.Bold else FontWeight.Normal))
         }
     }
 }
@@ -113,24 +121,34 @@ private fun stateText(a: Aircraft) = when (a.state) {
     AcState.LINED_UP -> "LINED UP"; AcState.TAKEOFF_ROLL -> "TAKEOFF ROLL"; AcState.AIRBORNE -> "AIRBORNE"
 }
 
-/** Wide screens: docked strip bay. Phones: thin rail (compact strips). Tapping a strip selects its aircraft. */
+/** Wide screens: docked strip bay. Phones: thin rail, top 4 plus a count. Strips are ordered by urgency; tap selects. */
 @Composable
 fun StripPanel(g: GameController, t: ScopeTheme, wide: Boolean, modifier: Modifier = Modifier) {
-    g.rev
+    g.rev; g.secRev
+    val list = g.strips
+    val shown = if (wide) list.size else minOf(4, list.size)
     Column(modifier.width(if (wide) 320.dp else 84.dp).fillMaxHeight().background(Color(t.panel)).border(1.dp, Color(t.panelLine)).padding(if (wide) 10.dp else 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         BasicText(if (wide) "FLIGHT STRIP BAY" else "STRIPS", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
-        for (a in g.sim.aircraft) {
+        for (k in 0 until shown) {
+            val a = list[k]
             val sel = a.id == g.selectedId
-            Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).border(if (sel) 2.dp else 1.dp, Color(if (sel) t.selected else t.panelLine))
+            val conflict = a.conflictWith != 0
+            val line = Color(if (conflict) t.warn else if (sel) t.selected else t.panelLine)
+            Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).border(if (sel || conflict) 2.dp else 1.dp, line)
                 .background(Color(t.bg)).clickable { g.select(a.id) }.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                BasicText(a.callsign, style = TextStyle(Color(if (sel) t.selected else t.departure), if (wide) 14.sp else 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                BasicText(a.callsign, style = TextStyle(Color(if (conflict) t.warn else if (sel) t.selected else t.departure), if (wide) 14.sp else 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
                 if (wide) {
                     BasicText("${a.type.code} ${a.type.wake.code} - ST ${a.standRef}", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
                     BasicText(a.route?.refs?.joinToString(" ")?.let { "ROUTE $it" } ?: "NO ROUTE", style = TextStyle(Color(t.text), 11.sp, fontFamily = Mono))
                 }
-                BasicText(stateText(a), style = TextStyle(Color(t.text), if (wide) 11.sp else 8.sp, fontFamily = Mono))
+                BasicText(if (conflict) "CONFLICT" else stateText(a), style = TextStyle(Color(if (conflict) t.warn else t.text), if (wide) 11.sp else 8.sp, fontFamily = Mono))
+                if (a.waitSince >= 0) {
+                    val w = (g.sim.time - a.waitSince).toInt()
+                    BasicText("WAIT %d:%02d".format(w / 60, w % 60), style = TextStyle(Color(if (w >= 60) t.warn else t.dim), if (wide) 10.sp else 8.sp, fontFamily = Mono))
+                }
             }
         }
+        if (shown < list.size) BasicText("+${list.size - shown} MORE", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
     }
 }
