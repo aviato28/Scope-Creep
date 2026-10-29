@@ -1,0 +1,21 @@
+# Gradle / Android / IDE
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.vscode/
+.cxx/
+captures/
+*.apk
+*.aab
+*.jks
+*.keystore
+# OSM cache and raw downloads (ODbL data is committed only as converted airports/*/airport.json)
+tools/airport-pipeline/cache/
+*.osm
+*.osm.xml
+osm-raw/
+__pycache__/
+.kotlin/
+.claude/worktrees/

@@ -1,0 +1,155 @@
+{
+ "version": 1,
+ "airport": "VOML",
+ "note": "Hand-authored, plausible mix for a small single-runway international airport (Gulf routes dominate the international share); weights are relative. Editorial approximation, not a schedule.",
+ "domesticShare": 0.8,
+ "airlines": {
+  "AXB": 36,
+  "IGO": 30,
+  "AIC": 12,
+  "AKJ": 6,
+  "SEJ": 2,
+  "ETD": 1,
+  "OMA": 1,
+  "GFA": 1,
+  "FDB": 1,
+  "ABY": 1,
+  "UAE": 1,
+  "QTR": 1
+ },
+ "domesticDestinations": [
+  {
+   "icao": "VOBL",
+   "iata": "BLR"
+  },
+  {
+   "icao": "VABB",
+   "iata": "BOM"
+  },
+  {
+   "icao": "VIDP",
+   "iata": "DEL"
+  },
+  {
+   "icao": "VOHS",
+   "iata": "HYD"
+  },
+  {
+   "icao": "VOMM",
+   "iata": "MAA"
+  },
+  {
+   "icao": "VOCI",
+   "iata": "COK"
+  },
+  {
+   "icao": "VOGO",
+   "iata": "GOI"
+  },
+  {
+   "icao": "VAPO",
+   "iata": "PNQ"
+  },
+  {
+   "icao": "VECC",
+   "iata": "CCU"
+  }
+ ],
+ "indianCarrierInternational": [
+  {
+   "icao": "OMDB",
+   "iata": "DXB"
+  },
+  {
+   "icao": "OMAA",
+   "iata": "AUH"
+  },
+  {
+   "icao": "OMSJ",
+   "iata": "SHJ"
+  },
+  {
+   "icao": "OTHH",
+   "iata": "DOH"
+  },
+  {
+   "icao": "OOMS",
+   "iata": "MCT"
+  },
+  {
+   "icao": "OEDF",
+   "iata": "DMM"
+  },
+  {
+   "icao": "OBBI",
+   "iata": "BAH"
+  },
+  {
+   "icao": "OKBK",
+   "iata": "KWI"
+  }
+ ],
+ "carrierRoutes": {
+  "ETD": [
+   [
+    "OMAA",
+    "AUH"
+   ]
+  ],
+  "OMA": [
+   [
+    "OOMS",
+    "MCT"
+   ]
+  ],
+  "GFA": [
+   [
+    "OBBI",
+    "BAH"
+   ]
+  ],
+  "FDB": [
+   [
+    "OMDB",
+    "DXB"
+   ]
+  ],
+  "ABY": [
+   [
+    "OMSJ",
+    "SHJ"
+   ]
+  ],
+  "UAE": [
+   [
+    "OMDB",
+    "DXB"
+   ]
+  ],
+  "QTR": [
+   [
+    "OTHH",
+    "DOH"
+   ]
+  ]
+ },
+ "standPreference": {
+  "heavyStandType": "contact",
+  "note": "Stands 8-10 (contact, code D) take the larger types; 1-4 are remote turboprop stands, 11-16 remote code C."
+ },
+ "ratesPerHour": {
+  "low": {
+   "dep": 3,
+   "arr": 3
+  },
+  "mid": {
+   "dep": 6,
+   "arr": 6
+  },
+  "high": {
+   "dep": 10,
+   "arr": 10
+  },
+  "note": "Roughly a third of VOBL's; not read by the sim yet."
+ }
+}

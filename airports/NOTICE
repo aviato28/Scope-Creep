@@ -1,0 +1,8 @@
+© OpenStreetMap contributors
+
+Airport layouts in this directory are derived from OpenStreetMap data
+(https://www.openstreetmap.org/copyright), converted by tools/airport-pipeline/.
+Licence: ODbL 1.0, see LICENSE in this directory.
+
+Layouts with meta.status "draft" are unreviewed conversions, not verified against
+official charts, and not for navigation.

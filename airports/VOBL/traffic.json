@@ -1,0 +1,228 @@
+{
+ "version": 1,
+ "airport": "VOBL",
+ "note": "Hand-authored, plausible mix; weights are relative.",
+ "domesticShare": 0.78,
+ "airlines": {
+  "IGO": 46,
+  "AIC": 16,
+  "AXB": 10,
+  "AKJ": 14,
+  "SEJ": 6,
+  "BAW": 1,
+  "QTR": 1,
+  "UAE": 1,
+  "SIA": 1,
+  "DLH": 1,
+  "ETD": 1,
+  "AFR": 0,
+  "THY": 1,
+  "SVA": 1,
+  "ALK": 1,
+  "FDB": 1,
+  "ABY": 1,
+  "MAS": 1,
+  "ETH": 0,
+  "GFA": 0,
+  "KAC": 0,
+  "OMA": 0,
+  "THA": 1,
+  "CPA": 0
+ },
+ "domesticDestinations": [
+  {
+   "icao": "VIDP",
+   "iata": "DEL"
+  },
+  {
+   "icao": "VABB",
+   "iata": "BOM"
+  },
+  {
+   "icao": "VOMM",
+   "iata": "MAA"
+  },
+  {
+   "icao": "VOHS",
+   "iata": "HYD"
+  },
+  {
+   "icao": "VECC",
+   "iata": "CCU"
+  },
+  {
+   "icao": "VOCI",
+   "iata": "COK"
+  },
+  {
+   "icao": "VAAH",
+   "iata": "AMD"
+  },
+  {
+   "icao": "VAPO",
+   "iata": "PNQ"
+  },
+  {
+   "icao": "VOGO",
+   "iata": "GOI"
+  },
+  {
+   "icao": "VEGY",
+   "iata": "GAU"
+  },
+  {
+   "icao": "VOTV",
+   "iata": "TRV"
+  },
+  {
+   "icao": "VILK",
+   "iata": "LKO"
+  }
+ ],
+ "indianCarrierInternational": [
+  {
+   "icao": "OMDB",
+   "iata": "DXB"
+  },
+  {
+   "icao": "WSSS",
+   "iata": "SIN"
+  },
+  {
+   "icao": "VCBI",
+   "iata": "CMB"
+  },
+  {
+   "icao": "OTHH",
+   "iata": "DOH"
+  },
+  {
+   "icao": "VTBS",
+   "iata": "BKK"
+  }
+ ],
+ "carrierRoutes": {
+  "BAW": [
+   [
+    "EGLL",
+    "LHR"
+   ]
+  ],
+  "QTR": [
+   [
+    "OTHH",
+    "DOH"
+   ]
+  ],
+  "UAE": [
+   [
+    "OMDB",
+    "DXB"
+   ]
+  ],
+  "SIA": [
+   [
+    "WSSS",
+    "SIN"
+   ]
+  ],
+  "DLH": [
+   [
+    "EDDF",
+    "FRA"
+   ]
+  ],
+  "ETD": [
+   [
+    "OMAA",
+    "AUH"
+   ]
+  ],
+  "AFR": [
+   [
+    "LFPG",
+    "CDG"
+   ]
+  ],
+  "THY": [
+   [
+    "LTFM",
+    "IST"
+   ]
+  ],
+  "SVA": [
+   [
+    "OEJN",
+    "JED"
+   ],
+   [
+    "OERK",
+    "RUH"
+   ]
+  ],
+  "ALK": [
+   [
+    "VCBI",
+    "CMB"
+   ]
+  ],
+  "FDB": [
+   [
+    "OMDB",
+    "DXB"
+   ]
+  ],
+  "ABY": [
+   [
+    "OMSJ",
+    "SHJ"
+   ]
+  ],
+  "MAS": [
+   [
+    "WMKK",
+    "KUL"
+   ]
+  ],
+  "ETH": [
+   [
+    "HAAB",
+    "ADD"
+   ]
+  ],
+  "GFA": [
+   [
+    "OBBI",
+    "BAH"
+   ]
+  ],
+  "KAC": [
+   [
+    "OKBK",
+    "KWI"
+   ]
+  ],
+  "OMA": [
+   [
+    "OOMS",
+    "MCT"
+   ]
+  ],
+  "THA": [
+   [
+    "VTBS",
+    "BKK"
+   ]
+  ],
+  "CPA": [
+   [
+    "VHHH",
+    "HKG"
+   ]
+  ]
+ },
+ "standPreference": {
+  "heavyStandType": "contact",
+  "note": "VOBL stands carry no terminal/apron data yet; heavies prefer stands tagged 'contact'."
+ }
+}

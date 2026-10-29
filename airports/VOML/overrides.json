@@ -1,0 +1,162 @@
+{
+  "_source": "Checked against AAI eAIP VOML: Aerodrome Chart AD 2 VOML 1-101 (11 JUNE 2026, AMDT 05/2026), Aircraft Parking/Docking Chart AD 2 VOML 1-301 (12 JUN 2025, AMDT 03/2025) and AD 2.8/2.9/2.12/2.20/2.23 text; eAIP package eaip-v2-10-2026 (AIRAC effective 29 OCT 2026)",
+  "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py. Sections: meta, ways, edges, holds, stands {ref,type,maxCode}, runways {<osm way id>:{backtrackAllowed}}, turnPads [{runwayWay,end,node,confirmed}], connect. Facts only; no chart text or artwork.",
+  "schemaVersion": 1,
+  "meta": {
+    "elevationM": 97,
+    "magneticVariationDeg": -1.9
+  },
+  "ways": {
+    "1076479192": {
+      "ref": "G1"
+    },
+    "1076479193": {
+      "ref": "G1"
+    },
+    "1076479196": {
+      "ref": "E"
+    },
+    "1327654693": {
+      "ref": "G9"
+    }
+  },
+  "edges": {
+    "e-osm-1183907115-1": {
+      "widthM": 45
+    },
+    "e-osm-1183907115-2": {
+      "widthM": 45
+    },
+    "e-osm-1183907115-3": {
+      "widthM": 45
+    },
+    "e-osm-1183907115-4": {
+      "widthM": 45
+    },
+    "e-osm-1183907115-5": {
+      "widthM": 45
+    },
+    "e-osm-1183907115-6": {
+      "widthM": 45
+    },
+    "e-osm-1183907115-7": {
+      "widthM": 45
+    },
+    "e-osm-59098928-1": {
+      "widthM": 45
+    },
+    "e-osm-59098928-2": {
+      "widthM": 45
+    },
+    "e-osm-59098928-3": {
+      "widthM": 45
+    },
+    "e-osm-1183907121-1": {
+      "widthM": 15
+    }
+  },
+  "holds": {
+    "h-osm-9871581531": {
+      "ref": "G1",
+      "type": "runway"
+    }
+  },
+  "stands": {
+    "s-osm-10994526279": {
+      "ref": "1",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994526287": {
+      "ref": "3",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994526293": {
+      "ref": "2",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994533912": {
+      "ref": "5",
+      "type": "contact",
+      "maxCode": "C"
+    },
+    "s-osm-10994533916": {
+      "ref": "6",
+      "type": "contact",
+      "maxCode": "C"
+    },
+    "s-osm-10994533920": {
+      "ref": "7",
+      "type": "contact",
+      "maxCode": "C"
+    },
+    "s-osm-10994533922": {
+      "ref": "8",
+      "type": "contact",
+      "maxCode": "D"
+    },
+    "s-osm-10994533929": {
+      "ref": "9",
+      "type": "contact",
+      "maxCode": "D"
+    },
+    "s-osm-10994533936": {
+      "ref": "10",
+      "type": "contact",
+      "maxCode": "D"
+    },
+    "s-osm-10994533937": {
+      "ref": "16",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994533938": {
+      "ref": "15",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994533939": {
+      "ref": "14",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994533941": {
+      "ref": "12",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-10994533943": {
+      "ref": "11",
+      "type": "remote",
+      "maxCode": "C"
+    },
+    "s-osm-5907997815": {
+      "ref": "4",
+      "type": "remote",
+      "maxCode": "C"
+    }
+  },
+  "runways": {
+    "98623865": {
+      "backtrackAllowed": true
+    }
+  },
+  "turnPads": [
+    {
+      "runwayWay": "98623865",
+      "end": "24",
+      "node": "n-osm-5628226934",
+      "confirmed": true,
+      "_note": "AD 2.9: RWY 24 turn pad marking; AD 2.14: turn pad edge lights; AD 2.23: RESA 240x90 m beyond 24 includes 60 m paved area"
+    },
+    {
+      "runwayWay": "98623865",
+      "end": "06",
+      "node": "n-osm-1141008782",
+      "confirmed": false,
+      "_note": "not in AIP text; G9 meets RWY 06 at the threshold (90 degree turn, 45 m radius), the chart shows a paved loop there; maintainer to confirm"
+    }
+  ]
+}
