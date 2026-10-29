@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -69,7 +70,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true; buildConfig = true }
-    testOptions { unitTests.all { it.useJUnitPlatform() } }
+    testOptions {
+        unitTests.all { it.useJUnitPlatform() }
+        unitTests.isIncludeAndroidResources = true   // Robolectric screenshot tests
+    }
     lint { abortOnError = false }
 }
 
@@ -128,4 +132,13 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    // Screenshot tests: Roborazzi on Robolectric (JVM, no emulator). JUnit4 tests run through the vintage engine.
+    testImplementation(libs.junit4)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

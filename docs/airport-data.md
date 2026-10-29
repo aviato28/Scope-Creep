@@ -271,3 +271,7 @@ Notes are the maintainer's own words, not quoted chart text.
 7. Magnetic variation: use a fixed per-airport value (suggested) versus a model.
 8. ODbL wording in NOTICE and the About screen; maintainer to confirm the share-alike reading.
 9. Which second airport to try, to test the pipeline's generality.
+
+## Screenshot tests
+
+Roborazzi on Robolectric (JVM, no emulator), `app/src/test/.../shots/ScreenshotTest.kt`: menu, briefing, scope (VOBL, fitted, seeded, 90 s advanced), About, Settings and summary at phone (873x393 dp) and tablet (1280x800 dp) in Phosphor, plus the scope in Modern Surface. Baselines in `app/src/test/screenshots/`. Re-record with `./gradlew :app:recordRoborazziDirectDebug`; CI runs `:app:verifyRoborazziDirectDebug` and uploads artifact `screenshots` (always) and `screenshot-diffs` (on failure). The status bar is private to MainActivity and is not in the scope shots. Locally, Robolectric fetches its android-all jar from Maven; if that is rate limited, put the jar in `~/.m2`.
