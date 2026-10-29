@@ -26,3 +26,6 @@ Android only installs an update signed with the same key as the installed app. L
 ## First-time install
 
 The release-signed APK cannot update over the debug or preview builds (different signing key, and preview also has a different application ID). Install the first release fresh (uninstall a debug build if needed); from then on the in-app updater (About, Check for updates) handles upgrades. Local `assembleDirectRelease` without the secrets falls back to the debug key.
+
+## Releasing without pushing a tag
+Change the `VERSION` file (e.g. `0.3.1`) and push it on any branch: the Release workflow creates tag `v0.3.1` and the GitHub Release itself. A version that has already been released fails the run, so always bump it. Append `-beta.1` (e.g. `0.4.0-beta.1`) for a pre-release that only beta-channel users see.

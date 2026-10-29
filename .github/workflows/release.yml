@@ -2,7 +2,10 @@ name: Release
 
 on:
   push:
+    # Release by changing VERSION on any branch, or by pushing a v* tag.
+    branches: ['**']
     tags: ['v*']
+    paths: ['VERSION']
   workflow_dispatch:
     inputs:
       version:
@@ -26,9 +29,18 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAG="v$INPUT_VERSION"; else TAG="$GITHUB_REF_NAME"; fi
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAG="v$INPUT_VERSION"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then TAG="$GITHUB_REF_NAME"
+          else TAG="v$(tr -d '[:space:]' < VERSION)"; fi
           case "$TAG" in *[!A-Za-z0-9.-]*) echo "::error::Bad version '$TAG'"; exit 1 ;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::Bad version '$TAG'"; exit 1 ;; esac
           echo "TAG=$TAG" >> "$GITHUB_ENV"
+      - name: Skip if already released
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists; bump VERSION."; exit 1
+          fi
       - name: Check signing secrets
         run: |
           missing=""
