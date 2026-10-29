@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import io.github.aviato28.scopecreep.game.GameController
 import io.github.aviato28.scopecreep.game.Mode
 import io.github.aviato28.scopecreep.sim.AcState
+import io.github.aviato28.scopecreep.sim.ConflictPredictor
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 import kotlin.math.sin
 
@@ -30,6 +31,10 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
     fun draw(c: Canvas, cam: Camera, g: GameController) {
         val z = cam.zoom; val w = cam.viewW; val h = cam.viewH; val d = density; val t = theme
         val inv = 1f / z
+        val sim = g.sim
+        // ---- low visibility: the whole scope dims (aircraft and blocks are drawn on top, undimmed)
+        val dimA = sim.ops.dim
+        if (dimA > 0f) { bg.color = ((dimA * 255).toInt() shl 24) or 0x00000000; c.drawRect(0f, 0f, w, h, bg) }
         // ---- world space: other active routes (faint, dashed), the selected aircraft's remaining route, the plan
         c.save(); c.translate(cam.ax, cam.ay); c.scale(z, -z); c.translate(-cam.cx, -cam.cy)
         for (i in 0 until g.otherCount) { dash.color = t.routeDim; dash.strokeWidth = 2.5f * d * inv; c.drawPath(g.otherPaths[i], dash) }
@@ -39,6 +44,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
             line.color = (t.selected and 0x00FFFFFF) or 0xB0000000.toInt(); line.strokeWidth = 3f * d * inv; c.drawPath(remPath, line)
         }
         if (g.hasGhost && g.timeSec < g.ghostUntil) { dash.color = (t.selected and 0x00FFFFFF) or 0x70000000; dash.strokeWidth = 4f * d * inv; c.drawPath(g.ghostPath, dash) }
+        if (g.hasBlocked) { line.color = (t.warn and 0x00FFFFFF) or 0x55000000; line.strokeWidth = 7f * d * inv; c.drawPath(g.blockedPath, line) }
         if (g.hasAvoid) { dash.color = t.warn; dash.strokeWidth = 5f * d * inv; c.drawPath(g.avoidPath, dash) }
         if (g.hasVia) { dash.color = t.departure; dash.strokeWidth = 5f * d * inv; c.drawPath(g.viaPath, dash) }
         if (g.hasSel && g.mode == Mode.PLAN) { line.color = t.selected; line.strokeWidth = 4.5f * d * inv; c.drawPath(g.selPath, line) }
@@ -71,7 +77,6 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
         }
 
         // ---- hold pulses while choosing a destination
-        val sim = g.sim
         if (g.mode == Mode.DEST || g.mode == Mode.PLAN) {
             val ph = (g.timeSec * 1.6f) % 1f
             line.color = t.departure; line.strokeWidth = 2f * d
@@ -101,8 +106,38 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
             c.drawText(f.name, fx + 9f * d, fy - 7f * d, txt)
         }
 
-        // ---- aircraft (constant screen size); data blocks nudged apart in screen space
+        // ---- runway vehicles: fire service (red) and the inspection vehicle (amber)
         val al = sim.alpha
+        val vs = sim.ops.vehicles
+        for (i in 0 until vs.size) {
+            val v = vs[i]
+            val vx = (v.interpX(al).toFloat() - cam.cx) * z + cam.ax; val vy = cam.ay - (v.interpY(al).toFloat() - cam.cy) * z
+            if (vx < -40 || vx > w + 40 || vy < -40 || vy > h + 40) continue
+            c.save(); c.translate(vx, vy); c.rotate(v.heading.toFloat())
+            fill.color = if (v.kind == 0) 0xFFFF5A4D.toInt() else t.departure
+            c.drawRect(-3f * d, -6f * d, 3f * d, 6f * d, fill)
+            fill.color = t.bg; c.drawRect(-1f * d, -4f * d, 1f * d, -1f * d, fill)
+            c.restore()
+        }
+
+        // ---- predicted conflicts: faint red dashed line between the two parties and the time to go
+        val pr = sim.predictor
+        for (i in 0 until pr.count) {
+            val pa = pr.a[i] ?: continue
+            val ax = (pa.interpX(al).toFloat() - cam.cx) * z + cam.ax; val ay = cam.ay - (pa.interpY(al).toFloat() - cam.cy) * z
+            val pb = pr.b[i]
+            val bx: Float; val by: Float
+            if (pb != null) { bx = (pb.interpX(al).toFloat() - cam.cx) * z + cam.ax; by = cam.ay - (pb.interpY(al).toFloat() - cam.cy) * z }
+            else { bx = (pr.bx[i].toFloat() - cam.cx) * z + cam.ax; by = cam.ay - (pr.by[i].toFloat() - cam.cy) * z }
+            if ((ax < -80 && bx < -80) || (ax > w + 80 && bx > w + 80) || (ay < -80 && by < -80) || (ay > h + 80 && by > h + 80)) continue
+            dash.color = (t.warn and 0x00FFFFFF) or 0x99000000.toInt(); dash.strokeWidth = 1.6f * d
+            c.drawLine(ax, ay, bx, by, dash)
+            txt.color = t.warn; txt.textSize = 9.5f * d; txt.textAlign = Paint.Align.CENTER
+            c.drawText(ConflictPredictor.label(pr.etaS[i] - (sim.time - pr.stamp)), (ax + bx) / 2, (ay + by) / 2 - 4f * d, txt)
+            txt.textAlign = Paint.Align.LEFT
+        }
+
+        // ---- aircraft (constant screen size); data blocks nudged apart in screen space
         nb = 0
         txt.textSize = 10.5f * d; txt.textAlign = Paint.Align.LEFT
         val lh = 12.5f * d; val bh = lh * 3.1f; val gapPx = 2f * d
@@ -127,7 +162,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
                 continue
             }
             val third = if (conflict) "CONFLICT" else a.instruction
-            val bw = maxOf(txt.measureText(a.callsign), txt.measureText(a.typeLine), txt.measureText(third)) + 8f * d
+            val bw = maxOf(txt.measureText(a.callsign), txt.measureText(a.tagLine), txt.measureText(third)) + (if (a.predicted) 18f else 8f) * d
             // pick the first free slot, trying last frame's choice first
             val pref = slotOf[a.id and 63]
             var bx = 0f; var top = 0f; var chosen = pref
@@ -149,8 +184,9 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
             if (sel || conflict) { line.strokeWidth = (if (conflict) 2f else 1.5f) * d; c.drawRect(bx, top, bx + bw, top + bh, line) }
             txt.color = col
             c.drawText(a.callsign, bx + 4f * d, top + lh * 0.95f, txt)
-            txt.color = if (conflict) t.warn else if (sel) t.selected else t.dim
-            c.drawText(a.typeLine, bx + 4f * d, top + lh * 1.95f, txt)
+            if (a.predicted) { txt.color = t.warn; c.drawText("!", bx + bw - 11f * d, top + lh * 0.95f, txt) }
+            txt.color = if (conflict || a.emergency > 0) t.warn else if (sel) t.selected else t.dim
+            c.drawText(a.tagLine, bx + 4f * d, top + lh * 1.95f, txt)
             txt.color = col
             c.drawText(third, bx + 4f * d, top + lh * 2.95f, txt)
             // oriented chevron

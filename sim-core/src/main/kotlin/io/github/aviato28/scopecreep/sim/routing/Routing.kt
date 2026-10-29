@@ -3,7 +3,7 @@ package io.github.aviato28.scopecreep.sim.routing
 import io.github.aviato28.scopecreep.sim.Polyline
 
 /** A departure hold point the player can send an aircraft to. */
-class Destination(val id: String, val nodeId: String, val node: Int, val ref: String?, val label: String, val runway: String, val x: Double, val y: Double, val stand: Boolean = false)
+class Destination(val id: String, val nodeId: String, val node: Int, val ref: String?, val label: String, val runway: String, val x: Double, val y: Double, val stand: Boolean = false, val category: String = "CAT1")
 
 /** A complete taxi route. [refs] is the chip sequence; the last element is typically the hold's own ref. */
 class Route(
@@ -27,6 +27,9 @@ class Router(val g: TaxiGraph) {
     private val refIdx = HashMap<String, Int>()
     init { for (e in g.edges) for (r in e.refs) refIdx.getOrPut(r) { refNames.add(r); refNames.size - 1 } }
     private val nr = refNames.size
+
+    /** Extra cost (m) per edge, for taxilane segments blocked by a pushing or starting aircraft (high but not impossible). Owned by the simulation. */
+    val edgePenalty = DoubleArray(g.edges.size)
 
     private fun edgeOf(s: Int) = s / nr / 2
     private fun fwdOf(s: Int) = (s / nr) % 2 == 1
@@ -57,7 +60,7 @@ class Router(val g: TaxiGraph) {
                 if (thru) { val sp = g.crossSide(pe!!.idx, u); if (sp == 0 || g.crossSide(ei, u) != -sp) continue }
                 val v = g.other(e, u)
                 if (g.isLeaf(v) && v != leafOk) continue
-                var c = e.length; var r = l
+                var c = e.length + edgePenalty[ei]; var r = l
                 if (e.refs.isNotEmpty()) {
                     r = if (l != 0 && refNames[l] in e.refs) l else refIdx.getValue(e.refs[0])
                     if (l != 0 && r != l) c += REF_CHANGE_M

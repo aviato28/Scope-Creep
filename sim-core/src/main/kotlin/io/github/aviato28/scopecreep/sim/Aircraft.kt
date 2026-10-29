@@ -9,6 +9,8 @@ enum class AcState {
     FINAL, ROLLOUT, VACATING, VACATED, GO_AROUND,
     /** Stopped before a runway crossing, waiting for CROSS RUNWAY. */
     HOLDING_XING,
+    /** Rejected takeoff: braking, then stopped on the runway until VACATE VIA. */
+    ABORTED,
 }
 
 enum class InstructionKind(val label: String) {
@@ -57,6 +59,8 @@ class Aircraft(
     val spoken = "${airline.rt} $number"
     val isArrival get() = arrival
     val typeLine = "${type.code}/${type.wake.code}"
+    /** Second line of the data block: the type, plus MAYDAY / PAN once an emergency is declared (prebuilt, so drawing never concatenates). */
+    var tagLine = typeLine
 
     var state = AcState.AT_STAND
     var x = pushPath.xs[0]; var y = pushPath.ys[0]
@@ -133,6 +137,24 @@ class Aircraft(
     var delayS = 0.0
     var routeM = 0.0; var routeBase = 0.0; var shortestM = 0.0
     var warned = false
+
+    // ---- departure slot (batch 2): sim seconds; 0 for arrivals ----
+    var tsat = 0.0; var ctot = 0.0; var ctotFrom = 0.0; var ctotTo = 0.0
+    /** Taxilane segments blocked while pushing / starting. */
+    var blockEdges = IntArray(0)
+    /** Predicted-conflict flag, refreshed by the [ConflictPredictor] (draws the "!" on the data block). */
+    var predicted = false
+
+    // ---- events ----
+    /** 0 = none, 1 = PAN, 2 = MAYDAY. */
+    var emergency = 0
+    /** Emergency stop on the runway after landing: when it has been standing, and until when. */
+    var stopUntil = 0.0; var stopped = false; var stopCall = false
+    var birdHoldUntil = 0.0; var birdChecked = false
+    /** Rejected takeoff: the speed (m/s) at which the abort happens; set when the roll starts. */
+    var rtoSpeed = 0.0
+    /** Pushback finished and the engines are starting. */
+    val starting get() = state == AcState.PUSHING && pathDone
 
     // ---- conflicts / wind ----
     var conflictSince = -1.0

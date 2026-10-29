@@ -36,6 +36,16 @@ class Simulation(
     private val spawnRng = SimRng(seed xor 0x5DEECE66DL)
     private val arrRng = SimRng(seed xor 0x2545F4914F6CDD1DL)
     private val evRng = SimRng(seed xor 0x7A3F5C1BL)
+    /** Departure slots (TSAT / CTOT) have their own stream so they never shift the departure schedule. */
+    private val slotRng = SimRng(seed xor 0x1B873593L)
+    /** Number of fixed steps run so far: the replay clock (commands are logged against it). */
+    var ticks = 0L; private set
+    /** Every accepted command and configuration change with the tick it was applied at (see [Replay]). */
+    val commandLog = ArrayList<LoggedCommand>()
+    /** Predicted conflicts for the next [SimConfig.predictHorizonS] seconds (refreshed at [SimConfig.predictEveryS]). */
+    val predictor = ConflictPredictor(this)
+    /** Operational events (emergency, rejected takeoff, LVP, closure, birds) and their state. */
+    val ops = OpsEngine(this)
     /** Game speed multiplier applied to elapsed real time in [update]. */
     var timeScale = config.timeScale
     /** Bumped when something needs the player's attention (pilot call, conflict); UIs use it to drop game speed. */
@@ -65,7 +75,7 @@ class Simulation(
     private var pendingArrEnd: String? = null
     private var arrSwitchAt = 0.0
     private val ctxCache = HashMap<String, RwyCtx>()
-    private val depEnds = LinkedHashSet<String>()
+    internal val depEnds = LinkedHashSet<String>()
 
     fun ctx(designator: String): RwyCtx = ctxCache.getOrPut(designator) {
         val rw = airport.runways.firstOrNull { r -> r.ends.any { it.designator == designator } } ?: error("no runway end $designator")
@@ -76,7 +86,14 @@ class Simulation(
     /** Runway centreline from the departure threshold toward the far end. */
     val runwayLine: Polyline get() = depCtx.line
     /** Departure holds for the runway in use. */
-    val destinations: List<Destination> get() = depCtx.destinations
+    val destinations: List<Destination> get() {
+        val all = depCtx.destinations
+        // low visibility: the CAT II / III holds if the data has them (the maintainer's airport data may not); otherwise the same holds, flagged in the UI
+        if (ops.lvp) { val cat = all.filter { it.category != "CAT1" }; if (cat.isNotEmpty()) return cat }
+        return all
+    }
+    /** True when runway end [designator]'s runway is closed (or about to be) for inspection. */
+    fun runwayClosedFor(designator: String) = ops.runwayClosed(rid(designator))
 
     private class Spot(val standRef: String, val standNode: Int, val taxiNode: Int, val push: Polyline, val options: List<PushOption>)
     /** Pushback choices per spawnable stand (every entry is non-empty). */
@@ -85,15 +102,15 @@ class Simulation(
     private val lineUpCache = HashMap<Int, Polyline>()
     private class Pending(val due: Double, val atc: Boolean, val text: String)
     private val pending = ArrayList<Pending>()
-    private class Rejoin(val due: Double, val airline: Airline, val number: Int, val type: AircraftType, val other: String, val standDest: Destination?, val goArounds: Int)
-    private val rejoins = ArrayList<Rejoin>()
+    internal class Rejoin(val due: Double, val airline: Airline, val number: Int, val type: AircraftType, val other: String, val standDest: Destination?, val goArounds: Int)
+    internal val rejoins = ArrayList<Rejoin>()
     private var nextId = 1
     private var spawnAt = 0.0
     private var arrSpawnAt = 0.0
     private val lineUpPos = HashMap<Int, Double>()
     private var lastNanos = -1L
     private var acc = 0.0
-    private val gnd = airport.meta.name.substringBefore(' ') + " Ground"
+    internal val gnd = airport.meta.name.substringBefore(' ') + " Ground"
     private val standDests = ArrayList<Destination>()
     private val standTypes = HashMap<Int, String?>()
 
@@ -101,7 +118,7 @@ class Simulation(
     val events = ArrayList<SimEvent>()
     private var eventsRead = 0
     fun pollEvents(): List<SimEvent> { if (eventsRead >= events.size) return emptyList(); val out = events.subList(eventsRead, events.size).toList(); eventsRead = events.size; return out }
-    private fun emit(e: SimEvent) { events += e; if (!shiftOver) score.on(e) }
+    internal fun emit(e: SimEvent) { events += e; if (!shiftOver) score.on(e) }
 
     // ---- scoring / shift ----
     val score = ScoreKeeper(config)
@@ -116,10 +133,13 @@ class Simulation(
         else if (config.shiftSeconds > 0.0 && time >= config.shiftSeconds) endReason = "TIME"
         if (endReason != null) revision++
     }
-    private fun warn(a: Aircraft) { a.warned = true }
+    internal fun warn(a: Aircraft) { a.warned = true }
     private fun finishMovement(a: Aircraft, kind: MovementKind) {
-        emit(MovementEvent(time, a.callsign, kind, a.delayS, a.routeM, a.shortestM, a.warned))
+        val slot = if (kind == MovementKind.DEPARTURE && a.ctot > 0.0) (if (time >= a.ctotFrom && time <= a.ctotTo) 1 else -1) else 0
+        emit(MovementEvent(time, a.callsign, kind, a.delayS, a.routeM, a.shortestM, a.warned, slot))
     }
+    /** CTOT cue for the strip right now: -1 = before the window (EARLY), 0 = inside (ON), 1 = past it (LATE). */
+    fun slotStatus(a: Aircraft): Int = if (time < a.ctotFrom) -1 else if (time > a.ctotTo) 1 else 0
 
     init {
         // starting configuration: the SimConfig runway ends (a hand-built airport may lack the arrival end)
@@ -175,10 +195,11 @@ class Simulation(
     }
 
     private var nextSecond = 1.0
+    private var nextPredict = 0.0
     fun step() {
         if (shiftOver) return
         val dt = config.stepSeconds
-        time += dt
+        time += dt; ticks++
         val pendArr = pendingArrEnd
         if (pendArr != null && time >= arrSwitchAt) { arrivalEnd = pendArr; pendingArrEnd = null; revision++ }
         if (time >= spawnAt) spawn()
@@ -200,6 +221,8 @@ class Simulation(
             i++
         }
         if (followMes.isNotEmpty()) updateFollowMes(dt)
+        ops.tick(dt)
+        if (time >= nextPredict) { nextPredict = time + config.predict.predictEveryS; predictor.update() }
         if (pending.isNotEmpty()) {
             var k = 0
             while (k < pending.size) { val p = pending[k]; if (p.due <= time) { log += RadioLine(time, p.atc, p.text); revision++; pending.removeAt(k) } else k++ }
@@ -317,6 +340,7 @@ class Simulation(
     /** Switch runway configuration. [silent] (session start only) applies it at once with no announcement. */
     fun setRunwayConfig(c: RunwayConfig, silent: Boolean = false) {
         if (c.id == runwayConfig.id) return
+        commandLog += LoggedCommand.config(c, silent, ticks)
         runwayConfig = c; depEnds += c.dep
         if (silent) { arrivalEnd = c.arr; pendingArrEnd = null; revision++; return }
         if (c.arr != arrivalEnd) { pendingArrEnd = c.arr; arrSwitchAt = time + config.arrivalSwitchDelayS } else pendingArrEnd = null
@@ -339,6 +363,7 @@ class Simulation(
             else listOfNotNull(InstructionKind.CLEARED_TO_LAND.takeIf { canClearToLand(a) }, InstructionKind.GO_AROUND)
         AcState.ROLLOUT -> if (exitOptions(a).isNotEmpty()) listOf(InstructionKind.VACATE_VIA) else emptyList()
         AcState.VACATED -> if (a.escort != null) emptyList() else listOf(InstructionKind.TAXI)
+        AcState.ABORTED -> if (a.stopped && exitOptions(a).isNotEmpty()) listOf(InstructionKind.VACATE_VIA) else emptyList()
         else -> emptyList()
     }
 
@@ -356,13 +381,13 @@ class Simulation(
 
     // runway occupancy ----------------------------------------------------------------------------
 
-    private fun rid(des: String) = ctx(des).rw.id
-    private fun depRwy(a: Aircraft): String? = a.destination?.runway?.takeIf { it.isNotEmpty() }?.let { rid(it) }
+    internal fun rid(des: String) = ctx(des).rw.id
+    internal fun depRwy(a: Aircraft): String? = a.destination?.runway?.takeIf { it.isNotEmpty() }?.let { rid(it) }
     private fun crossRwy(a: Aircraft): String? = if (a.crossing && a.xingDone < a.xingRwy.size) a.xingRwy[a.xingDone] else null
 
     /** True when [b] physically occupies runway [rwId] (lined-up aircraft only when [withLinedUp]). */
-    private fun occupies(b: Aircraft, rwId: String, withLinedUp: Boolean): Boolean = when (b.state) {
-        AcState.TAKEOFF_ROLL -> depRwy(b) == rwId
+    internal fun occupies(b: Aircraft, rwId: String, withLinedUp: Boolean): Boolean = when (b.state) {
+        AcState.TAKEOFF_ROLL, AcState.ABORTED -> depRwy(b) == rwId
         AcState.LINED_UP -> withLinedUp && depRwy(b) == rwId
         AcState.ROLLOUT -> rid(b.rwyEnd) == rwId
         AcState.VACATING -> b.onRunway && rid(b.rwyEnd) == rwId
@@ -373,7 +398,7 @@ class Simulation(
         for (b in aircraft) if (b !== a && occupies(b, rwId, withLinedUp)) return true
         return false
     }
-    private fun etaToTouchdown(b: Aircraft) = (b.thrS + config.touchdownZoneM - b.s) / config.approachSpeed
+    internal fun etaToTouchdown(b: Aircraft) = (b.thrS + config.touchdownZoneM - b.s) / config.approachSpeed
     /** Seconds to touchdown for an aircraft on final (strips). */
     fun etaS(b: Aircraft) = etaToTouchdown(b)
     /** A cleared arrival on this runway closer than [withinS] seconds from touchdown. */
@@ -392,22 +417,30 @@ class Simulation(
             if (b.state == AcState.LINED_UP && depRwy(b) == rwId) return false
             if (!occupies(b, rwId, false)) continue
             val ahead = (b.state == AcState.TAKEOFF_ROLL || b.state == AcState.ROLLOUT || b.state == AcState.VACATING) && c.takeoffLine.project(b.x, b.y) >= linePos(a) + 150.0
-            if (!ahead) return false
+            if (!ahead || ops.lvp) return false
         }
+        if (ops.runwayClosed(rwId) || ops.emergencyInbound(rwId) || (ops.lvp && ops.arrivalWithin(rwId, config.events.lvpArrivalNm * 1852.0))) return false
         return !arrivalSoon(rwId, 40.0)
     }
     /** Takeoff clearance needs the runway free of other line-ups, rolls and landings, and no landing due within a minute. */
     fun canTakeoff(a: Aircraft): Boolean {
         if (!(a.state == AcState.HOLDING_SHORT || (a.state == AcState.LINED_UP && !a.armedTakeoff))) return false
         val rwId = depRwy(a) ?: return false
+        if (a.state == AcState.HOLDING_SHORT && (ops.runwayClosed(rwId) || ops.emergencyInbound(rwId))) return false
+        if (ops.lvp) {
+            val l = lastDep[rwId]
+            if (l != null && time - l.airborneAt < config.events.lvpDepSpacingS) return false
+            if (arrivalSoon(rwId, 90.0)) return false
+        }
         return !runwayBusy(a, rwId, true) && !arrivalSoon(rwId, 60.0)
     }
 
     /** Seconds until an aircraft that blocks the runway will have cleared it (rough, for "will be clear" decisions). */
-    private fun clearsIn(b: Aircraft): Double = when (b.state) {
+    internal fun clearsIn(b: Aircraft): Double = when (b.state) {
         AcState.TAKEOFF_ROLL -> 30.0
+        AcState.ABORTED -> if (b.stopped || b.speed <= 0.0) Double.POSITIVE_INFINITY else 40.0
         AcState.LINED_UP -> if (b.armedTakeoff) 45.0 else Double.POSITIVE_INFINITY
-        AcState.ROLLOUT -> 45.0
+        AcState.ROLLOUT -> if (b.stopUntil > 0.0) Double.POSITIVE_INFINITY else if (b.speed < 5.0) 70.0 else 45.0
         AcState.VACATING -> 10.0
         AcState.TAXIING -> 15.0
         else -> 0.0
@@ -417,7 +450,8 @@ class Simulation(
         if (a.state != AcState.FINAL || a.cleared) return false
         val rwId = rid(a.rwyEnd)
         val budget = (a.thrS - config.decisionM - a.s) / config.approachSpeed
-        for (b in aircraft) if (b !== a && occupies(b, rwId, true) && clearsIn(b) > budget + 1.0) return false
+        if (ops.runwayClosed(rwId)) return false
+        for (b in aircraft) if (b !== a && occupies(b, rwId, true) && (ops.lvp || clearsIn(b) > budget + 1.0)) return false
         // another landing right ahead of us
         for (b in aircraft) if (b !== a && b.state == AcState.FINAL && rid(b.rwyEnd) == rwId && b.s > a.s && etaToTouchdown(a) - etaToTouchdown(b) < 50.0) return false
         return true
@@ -428,21 +462,25 @@ class Simulation(
     fun canCross(a: Aircraft): Boolean {
         if (a.state != AcState.HOLDING_XING || a.xingDone >= a.xingRwy.size) return false
         val rwId = a.xingRwy[a.xingDone]
-        return !runwayBusy(a, rwId, true) && !arrivalSoon(rwId, 70.0, clearedOnly = false)
+        return !ops.runwayClosed(rwId) && !runwayBusy(a, rwId, true) && !arrivalSoon(rwId, 70.0, clearedOnly = false)
     }
     /** Short reason why the next clearance is unavailable for [a] (for the action bar), or null. */
     fun blockReason(a: Aircraft): String? = when (a.state) {
         AcState.HOLDING_SHORT, AcState.LINED_UP -> if (a.armedTakeoff) null else if (a.windRefused) "CROSSWIND, UNABLE: CHANGE RUNWAY"
             else if (a.state == AcState.LINED_UP || canLineUp(a) || canTakeoff(a)) null
+            else if (ops.runwayClosed(rid(a.destination!!.runway))) "RUNWAY CLOSED"
+            else if (ops.emergencyInbound(rid(a.destination!!.runway))) "EMERGENCY LANDING: RUNWAY RESERVED"
+            else if (ops.lvp && ops.arrivalWithin(rid(a.destination!!.runway), config.events.lvpArrivalNm * 1852.0)) "LVP: ARRIVAL INSIDE 4 NM"
             else if (arrivalSoon(rid(a.destination!!.runway), 60.0)) "LANDING TRAFFIC: WAIT"
             else if (aircraft.any { it !== a && it.state == AcState.LINED_UP && depRwy(it) == rid(a.destination!!.runway) }) "AIRCRAFT LINED UP: WAIT"
             else "RUNWAY BUSY: WAIT"
-        AcState.FINAL -> if (a.cleared || canClearToLand(a)) null else "RUNWAY NOT CLEAR: WAIT OR GO AROUND"
-        AcState.HOLDING_XING -> if (canCross(a)) null else "RUNWAY ACTIVE: WAIT"
+        AcState.FINAL -> if (a.cleared || canClearToLand(a)) null else if (ops.runwayClosed(rid(a.rwyEnd))) "RUNWAY CLOSED: GO AROUND" else "RUNWAY NOT CLEAR: WAIT OR GO AROUND"
+        AcState.HOLDING_XING -> if (canCross(a)) null else if (ops.runwayClosed(a.xingRwy[a.xingDone])) "RUNWAY CLOSED" else "RUNWAY ACTIVE: WAIT"
+        AcState.ABORTED -> if (a.stopped) null else "BRAKING"
         else -> null
     }
     fun crossingRunwayName(a: Aircraft): String = if (a.xingDone < a.xingRwy.size) rwName(a.xingRwy[a.xingDone]) else ""
-    private fun rwName(id: String) = airport.runways.firstOrNull { it.id == id }?.ends?.joinToString("/") { it.designator } ?: id
+    internal fun rwName(id: String) = airport.runways.firstOrNull { it.id == id }?.ends?.joinToString("/") { it.designator } ?: id
 
     // arrival queries -------------------------------------------------------------------------------
 
@@ -452,6 +490,11 @@ class Simulation(
      * Indexes are what [VacateVia] takes; [VacateVia.exitId] is more robust.
      */
     fun exitOptions(a: Aircraft): List<RunwayExit> {
+        if (a.state == AcState.ABORTED || (a.state == AcState.ROLLOUT && a.stopped)) {
+            if (!a.stopped) return emptyList()
+            val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
+            return c.exits.filter { it.sOnRunway >= cur + 20.0 }
+        }
         val rolling = a.state == AcState.ROLLOUT
         if (!rolling && !(a.state == AcState.FINAL && a.cleared)) return emptyList()
         val c = ctx(a.rwyEnd)
@@ -464,6 +507,7 @@ class Simulation(
     /** The exit the pilot takes when the controller names none: the first suitable rapid exit beyond the type's typical rollout. */
     fun defaultExit(a: Aircraft): RunwayExit? {
         val opts = exitOptions(a)
+        if (a.state == AcState.ABORTED || (a.state == AcState.ROLLOUT && a.speed < 1.0)) return opts.firstOrNull { !blockedExit(it, a) } ?: opts.firstOrNull()
         if (opts.isNotEmpty()) {
             val roll = config.rolloutM(a.type)
             val pref = opts.filter { it.ret && it.sOnRunway >= roll }
@@ -554,6 +598,18 @@ class Simulation(
 
     fun find(id: Int): Aircraft? = aircraft.firstOrNull { it.id == id }
 
+    // ---- arrival timeline (UI) ----
+
+    /** Estimated seconds until the next not-yet-visible arrival lands (its callsign is not drawn yet), or -1 when arrivals are off. */
+    fun nextArrivalEtaS(): Double = if (!config.arrivalsEnabled) -1.0 else max(0.0, arrSpawnAt - time) + (config.finalLeadMin + config.finalLeadMax) / 2
+    /** Go-arounds that will rejoin the approach: calls [f] with the callsign and the estimated seconds to touchdown. */
+    inline fun forEachRejoin(f: (String, Double) -> Unit) { for (i in 0 until rejoinCount()) f(rejoinCallsign(i), rejoinEtaS(i)) }
+    fun rejoinCount() = rejoins.size
+    fun rejoinCallsign(i: Int) = rejoins[i].airline.icao + rejoins[i].number
+    fun rejoinEtaS(i: Int) = max(0.0, rejoins[i].due - time) + (config.finalLeadMin + config.finalLeadMax) / 2
+    /** Runway designator a departure will use (its hold's runway, else the departure runway in use). */
+    fun departureRunway(a: Aircraft): String = a.destination?.runway?.takeIf { it.isNotEmpty() } ?: runwayConfig.dep
+
     // ---- commands ----------------------------------------------------------------------------
 
     private fun routeBody(r: Route, d: Destination): String {
@@ -592,7 +648,14 @@ class Simulation(
         setRoute(a, r, 0.0)
     }
 
+    /** Applies a player command. Accepted commands are appended to [commandLog] so the session can be replayed. */
     fun submit(cmd: Command): Boolean {
+        val ok = applyCommand(cmd)
+        if (ok) commandLog += LoggedCommand.of(cmd, ticks, graph)
+        return ok
+    }
+
+    private fun applyCommand(cmd: Command): Boolean {
         val a = find(cmd.aircraftId) ?: return false
         when (cmd) {
             is PushbackApproved -> {
@@ -607,6 +670,7 @@ class Simulation(
                 val dur = rng.range(config.pushDurationMin, config.pushDurationMax)
                 a.pushSpeed = min(config.pushSpeedMax, max(0.3, a.pushPath.length / dur))
                 a.path = a.pushPath; a.s = 0.0; a.pathDone = false; a.speed = 0.0
+                blockLane(a)
             }
             is Taxi -> {
                 val r = cmd.route
@@ -691,6 +755,7 @@ class Simulation(
                 wakeCheck(a, c)
                 if (a.state == AcState.HOLDING_SHORT) beginLineUp(a)
                 a.armedTakeoff = true; a.instruction = "CLEARED TKOF"
+                ops.takeoffCleared(a, c.rw.id)
             }
             is ClearedToLand -> {
                 if (!canClearToLand(a)) return false
@@ -708,12 +773,14 @@ class Simulation(
                 startGoAround(a, GoAroundReason.COMMANDED, quiet = true)
             }
             is VacateVia -> {
-                if (a.state != AcState.ROLLOUT && !(a.state == AcState.FINAL && a.cleared)) return false
+                if (a.state != AcState.ROLLOUT && a.state != AcState.ABORTED && !(a.state == AcState.FINAL && a.cleared)) return false
                 val opts = exitOptions(a)
                 val ex = (if (cmd.exitId != null) opts.firstOrNull { it.hold.id == cmd.exitId } else if (cmd.exitIdx >= 0) opts.getOrNull(cmd.exitIdx) else defaultExit(a)) ?: return false
                 atc("${a.spoken}, vacate via ${ex.say}."); pilot("Vacate via ${ex.say}, ${a.spoken}.")
                 a.exitPick = ex
-                if (a.state == AcState.ROLLOUT) takeExit(a, ex) else a.instruction = "CLEARED LDG ${ex.label}"
+                if (a.state == AcState.ABORTED) takeExit(a, ex)
+                else if (a.state == AcState.ROLLOUT) { if (a.stopUntil <= 0.0) takeExit(a, ex) else a.instruction = "HOLD, THEN ${ex.label}" }
+                else a.instruction = "CLEARED LDG ${ex.label}"
             }
         }
         revision++
@@ -722,8 +789,8 @@ class Simulation(
 
     // wake spacing between consecutive departures from one runway (design.md section 6)
     private val wakeTable = arrayOf(intArrayOf(0, 0, 0, 0), intArrayOf(30, 0, 0, 0), intArrayOf(60, 45, 0, 0), intArrayOf(90, 75, 60, 0))
-    private class LastDep(val callsign: String, val wake: Wake, var airborneAt: Double)
-    private val lastDep = HashMap<String, LastDep>()
+    internal class LastDep(val callsign: String, val wake: Wake, var airborneAt: Double)
+    internal val lastDep = HashMap<String, LastDep>()
     private fun wakeCheck(a: Aircraft, c: RwyCtx) {
         val l = lastDep[c.rw.id] ?: return
         val need = wakeTable[l.wake.ordinal][a.type.wake.ordinal]
@@ -749,6 +816,25 @@ class Simulation(
 
     private fun ctxOf(a: Aircraft) = ctx(a.destination!!.runway)
 
+    // ---- pushback blocks the taxilane ------------------------------------------------------------
+
+    /** The taxilane segments around the apron node a pushing / starting aircraft sits on (stand lead-ins excluded). */
+    private fun laneEdges(a: Aircraft): IntArray {
+        val t = spots[a.spot].taxiNode
+        return graph.adj[t].filter { !graph.isLeaf(graph.other(graph.edges[it], t)) }.toIntArray()
+    }
+    private fun blockLane(a: Aircraft) {
+        a.blockEdges = laneEdges(a)
+        for (e in a.blockEdges) router.edgePenalty[e] += config.slots.blockedEdgeCostM
+        revision++
+    }
+    private fun unblockLane(a: Aircraft) {
+        for (e in a.blockEdges) router.edgePenalty[e] = max(0.0, router.edgePenalty[e] - config.slots.blockedEdgeCostM)
+        a.blockEdges = IntArray(0); revision++
+    }
+    /** Segments currently blocked by a pushing or starting aircraft (for the dim red highlight). */
+    fun blockedEdgeList(): List<Int> = aircraft.filter { it.state == AcState.PUSHING }.flatMap { it.blockEdges.toList() }
+
     private fun beginLineUp(a: Aircraft) {
         val d = a.destination!!; val c = ctxOf(a)
         a.path = lineUpCache.getOrPut(d.node) {
@@ -764,7 +850,7 @@ class Simulation(
 
     // ---- arrivals ------------------------------------------------------------------------------
 
-    private fun startGoAround(a: Aircraft, reason: GoAroundReason, quiet: Boolean = false) {
+    internal fun startGoAround(a: Aircraft, reason: GoAroundReason, quiet: Boolean = false) {
         val c = ctx(a.rwyEnd)
         a.state = AcState.GO_AROUND; a.airborneAt = time; a.cleared = false; a.goArounds++; a.goAroundReason = reason
         a.instruction = "GO AROUND"; goArounds++
@@ -776,6 +862,7 @@ class Simulation(
                 GoAroundReason.TAILWIND -> "${a.spoken}, tailwind $tw knots, unable, going around."
                 GoAroundReason.CROSSWIND -> "${a.spoken}, crosswind $xw knots exceeds limits, going around."
                 GoAroundReason.COMMANDED -> "${a.spoken}, going around."
+                GoAroundReason.EVENT -> ops.eventGoAroundText(a, c.rw.id)
             })
         }
         warn(a); emit(GoAroundEvent(time, a.callsign, reason))
@@ -787,7 +874,10 @@ class Simulation(
         val c = ctx(a.rwyEnd)
         val tw = tailwindKt(c.designator)
         val reason = when {
+            ops.eventBlocked(c.rw.id) -> GoAroundReason.EVENT
             !runwayClearNow(a) -> GoAroundReason.RUNWAY_OCCUPIED
+            a.emergency > 0 -> null
+            ops.birdGoAround(c.rw.id) -> GoAroundReason.EVENT
             wind.crosswind(time, c.end.trueHeadingDeg) > a.type.xwindKt -> GoAroundReason.CROSSWIND
             tw > config.tailwindLimitKt && arrRng.nextDouble() < min(config.tailwindGoAroundMax, (tw - config.tailwindLimitKt) * config.tailwindGoAroundPerKt) -> GoAroundReason.TAILWIND
             else -> null
@@ -799,6 +889,11 @@ class Simulation(
         val c = ctx(arrivalEnd)
         // mixed mode: do not feed the runway a new arrival while a departure is lined up or rolling on it
         if (runwayConfig.mixed && aircraft.any { (it.state == AcState.LINED_UP || it.state == AcState.TAKEOFF_ROLL) && it.destination?.runway == c.designator }) {
+            if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds)
+            return
+        }
+        // a closed or blocked runway gets no new traffic: the arrival waits outside
+        if (ops.runwayBlocked(c.rw.id)) {
             if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds)
             return
         }
@@ -827,16 +922,17 @@ class Simulation(
         a.prevX = a.x; a.prevY = a.y; a.prevHeading = a.heading
         a.state = AcState.FINAL; a.instruction = "REQ LANDING"; a.lastRecall = time + 20.0
         aircraft += a; revision++
+        if (re == null) ops.arrivalSpawned(a)
         val tw = tailwindKt(c.designator)
         call("$gnd, ${a.spoken}, established ILS runway ${c.designator}" + (if (tw > config.tailwindLimitKt) ", reports tailwind ${tw.roundToInt()} knots" else "") + ", request landing.")
         if (re == null) arrSpawnAt = time + arrInterval() * arrRng.range(1 - config.spawnJitter, 1 + config.spawnJitter)
     }
     private fun arrInterval(): Double {
         val base = config.arrivalIntervalAt0 + (config.arrivalIntervalAt1 - config.arrivalIntervalAt0) * pressure.coerceIn(0.0, 1.0)
-        return if (runwayConfig.mixed) maxOf(base, config.mixedArrivalIntervalS) else base
+        return (if (runwayConfig.mixed) maxOf(base, config.mixedArrivalIntervalS) else base) / ops.rateFactor
     }
 
-    private fun blockedExit(ex: RunwayExit, self: Aircraft): Boolean {
+    internal fun blockedExit(ex: RunwayExit, self: Aircraft): Boolean {
         for (b in aircraft) {
             if (b === self) continue
             val st = b.state
@@ -844,7 +940,7 @@ class Simulation(
         }
         return false
     }
-    private fun takeExit(a: Aircraft, ex: RunwayExit) {
+    internal fun takeExit(a: Aircraft, ex: RunwayExit) {
         val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
         val sx = max(ex.sOnRunway, cur + 1.0)
         val g = ex.geom
@@ -876,10 +972,10 @@ class Simulation(
                     var dh = (a.pushHeading1 - a.pushHeading0) % 360.0
                     if (dh > 180) dh -= 360; if (dh < -180) dh += 360
                     a.heading = ((a.pushHeading0 + dh * k) % 360.0 + 360.0) % 360.0
-                    if (a.pathDone) { a.speed = 0.0; a.timer = rng.range(config.requestTaxiDelayMin, config.requestTaxiDelayMax) }
+                    if (a.pathDone) { a.speed = 0.0; a.timer = rng.range(config.slots.startupMinS, config.slots.startupMaxS); a.instruction = "STARTING"; revision++ }
                 } else {
                     a.timer -= dt
-                    if (a.timer <= 0) { a.state = AcState.REQUEST_TAXI; a.instruction = "REQ TAXI"; call("$gnd, ${a.spoken}, request taxi.") }
+                    if (a.timer <= 0) { unblockLane(a); a.state = AcState.REQUEST_TAXI; a.instruction = "REQ TAXI"; call("$gnd, ${a.spoken}, request taxi.") }
                 }
             }
             AcState.TAXIING -> {
@@ -921,16 +1017,19 @@ class Simulation(
                     if (a.pathDone) { val l = ctxOf(a).line; a.faceHeading = l.headingAt(l.project(a.x, a.y)) }
                 } else {
                     turnToward(a, a.faceHeading, dt)
-                    if (a.armedTakeoff && Polyline.angleDiff(a.heading, a.faceHeading) < 4.0) {
+                    if (a.armedTakeoff && time < a.birdHoldUntil) a.instruction = "BIRDS - STANDBY"
+                    else if (a.armedTakeoff && Polyline.angleDiff(a.heading, a.faceHeading) < 4.0) {
                         a.state = AcState.TAKEOFF_ROLL; a.instruction = "TAKEOFF"
                         val tl = ctxOf(a).takeoffLine
                         a.path = tl.from(tl.project(a.x, a.y)); a.s = 0.0; a.speed = 0.0; revision++
+                        ops.rollStarted(a)
                     }
                 }
             }
             AcState.TAKEOFF_ROLL -> {
                 a.speed += config.takeoffAccel * dt
                 moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
+                if (a.rtoSpeed > 0.0 && a.speed >= a.rtoSpeed) { ops.reject(a); return }
                 if (a.speed >= config.rotateSpeed) {
                     a.state = AcState.AIRBORNE; a.airborneAt = time; a.instruction = "AIRBORNE"; departed++; revision++
                     val c = ctxOf(a)
@@ -941,6 +1040,7 @@ class Simulation(
             AcState.AIRBORNE -> {
                 a.speed = min(a.speed + 3.0 * dt, 95.0); moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
             }
+            AcState.ABORTED -> ops.abortedUpdate(a, dt)
             AcState.FINAL -> finalUpdate(a, dt)
             AcState.GO_AROUND -> {
                 a.speed = min(a.speed + 3.0 * dt, 95.0); moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
@@ -951,9 +1051,17 @@ class Simulation(
                 if (a.onRunway && a.s > a.exitAtS + 80.0) { a.onRunway = false; revision++ }
                 if (a.pathDone) {
                     val ex = a.exit!!
-                    a.onRunway = false; a.state = AcState.VACATED; a.taxiNode = ex.nodes.last()
-                    a.noEdges = setOf(ex.edges.last()); a.route = null; a.instruction = "REQ TAXI IN"
-                    call("$gnd, ${a.spoken}, runway vacated via ${ex.label}, request taxi to stand ${a.standDest?.label ?: a.standRef}.")
+                    a.onRunway = false; a.taxiNode = ex.nodes.last()
+                    a.noEdges = setOf(ex.edges.last()); a.route = null
+                    if (a.isArrival) {
+                        a.state = AcState.VACATED; a.instruction = "REQ TAXI IN"
+                        call("$gnd, ${a.spoken}, runway vacated via ${ex.label}, request taxi to stand ${a.standDest?.label ?: a.standRef}.")
+                    } else {
+                        // a rejected takeoff: back to the holding points for another go
+                        a.state = AcState.REQUEST_TAXI; a.instruction = "REQ TAXI"; a.armedTakeoff = false; a.rtoSpeed = 0.0; a.stopped = false; a.windRefused = false
+                        call("$gnd, ${a.spoken}, runway vacated via ${ex.label}, request taxi to a holding point.")
+                    }
+                    ops.vacated(a)
                 }
             }
         }
@@ -967,19 +1075,21 @@ class Simulation(
         moveBy(a, config.approachSpeed * dt); a.speed = config.approachSpeed; a.heading = a.path.headingAt(a.s)
         val dist = a.thrS - a.s
         if (!a.cleared && dist < config.landingRecallM && time >= a.lastRecall) {
-            a.lastRecall = time + 20.0
-            call("${a.spoken}, ILS runway ${a.rwyEnd}, request landing clearance.")
+            a.lastRecall = time + (if (a.emergency > 0) 10.0 else 20.0)
+            call((if (a.emergency > 0) ops.emergencyPrefix(a) else "") + "${a.spoken}, ILS runway ${a.rwyEnd}, request landing clearance.")
         }
         if (a.cleared && !a.decided && dist <= config.decisionM) { decide(a); if (a.state != AcState.FINAL) return }
-        if (!a.cleared && dist <= config.noClearanceGoAroundM) { startGoAround(a, GoAroundReason.NO_CLEARANCE); return }
+        if (!a.cleared && dist <= config.noClearanceGoAroundM) { startGoAround(a, if (ops.eventBlocked(rid(a.rwyEnd))) GoAroundReason.EVENT else GoAroundReason.NO_CLEARANCE); return }
         if (a.s >= a.thrS + config.touchdownZoneM && a.cleared) {
             a.state = AcState.ROLLOUT; a.speed = config.touchdownSpeed; a.onRunway = true; a.instruction = "ROLLOUT"
             landed++; emit(LandedEvent(time, a.callsign, a.rwyEnd)); revision++
+            ops.landed(a)
         }
     }
 
     private fun rolloutUpdate(a: Aircraft, dt: Double) {
         val ve = config.exitSpeed
+        if (a.stopUntil > 0.0) { if (ops.emergencyStopUpdate(a, dt)) return }
         if (a.exitAtS == Double.POSITIVE_INFINITY && (a.exitPick != null || a.speed <= config.touchdownSpeed - 0.6 * (config.touchdownSpeed - ve) || exitOptions(a).size <= 1)) {
             val pick = a.exitPick?.takeIf { p -> exitOptions(a).any { it.hold.id == p.hold.id } }
             val ex = pick ?: defaultExit(a)
@@ -989,20 +1099,21 @@ class Simulation(
             val room = max(0.0, a.exitAtS - a.s)
             val target = sqrt(ve * ve + 2 * config.rolloutDecel * room)
             if (target < a.speed) a.speed = max(target, a.speed - config.rolloutMaxDecel * dt)
+            else if (a.speed < ve) a.speed = min(target, a.speed + config.accel * dt)
         } else a.speed = max(ve, a.speed - config.rolloutDecel * dt)
         moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
         if (a.exitAtS.isFinite() && a.s >= a.exitAtS) { a.state = AcState.VACATING; revision++ }
         else if (a.s > a.thrS + ctx(a.rwyEnd).line.length) a.speed = 0.0 // ran out of runway with no exit (only on hand-built test airports)
     }
 
-    private fun moveBy(a: Aircraft, d: Double) {
+    internal fun moveBy(a: Aircraft, d: Double) {
         val p = a.path
         a.s += d
         if (a.s >= p.length - 0.05) { a.s = p.length; a.pathDone = true }
         a.x = p.xAt(a.s); a.y = p.yAt(a.s)
     }
 
-    private fun turnLimit(deg: Double): Double {
+    internal fun turnLimit(deg: Double): Double {
         val c = config
         if (deg <= c.turnFullSpeedBelowDeg) return c.taxiSpeed
         if (deg >= c.turnSlowestAtDeg) return c.turnSpeed
@@ -1066,8 +1177,13 @@ class Simulation(
         val a = Aircraft(nextId++, airline, num, type, spot.standRef, spot.taxiNode, spot.push)
         a.spot = si; a.other = profile.otherEnd(airline, spawnRng)
         a.timer = spawnRng.range(config.atStandDelayMin, config.atStandDelayMax); a.instruction = "AT STAND"
+        // slot: the pilot asks for push at TSAT; CTOT is the planned takeoff, valid from CTOT - early to CTOT + late
+        a.timer += slotRng.range(config.slots.tsatMinS, config.slots.tsatMaxS)
+        a.tsat = time + a.timer
+        a.ctot = a.tsat + config.slots.ctotNominalS + slotRng.range(-config.slots.ctotJitterS, config.slots.ctotJitterS)
+        a.ctotFrom = a.ctot - config.slots.ctotEarlyS; a.ctotTo = a.ctot + config.slots.ctotLateS
         aircraft += a; revision++
-        spawnAt = time + Traffic.interval(config, pressure) * spawnRng.range(1 - config.spawnJitter, 1 + config.spawnJitter)
+        spawnAt = time + Traffic.interval(config, pressure) / ops.rateFactor * spawnRng.range(1 - config.spawnJitter, 1 + config.spawnJitter)
     }
 
     // ---- separation: following, head-on, junctions, queues ------------------------------------
@@ -1235,7 +1351,16 @@ class Simulation(
         }
     }
 
-    private fun atc(t: String) { log += RadioLine(time, true, t); revision++ }
-    private fun pilot(t: String) { pending += Pending(time + config.readbackDelay, false, t) }
-    private fun call(t: String) { log += RadioLine(time, false, t); revision++; attention++ }
+    /** ATC-side radio line that also needs the player's eyes: warn colour, drops game speed. */
+    internal fun announce(t: String) { log += RadioLine(time, true, t, warn = true); revision++; attention++ }
+    internal fun touch() { revision++ }
+    /** Test and debug hook (also what the event scheduler uses): start an operational event now. Logged for replays. */
+    fun triggerEvent(kind: OpsKind): Boolean {
+        val ok = ops.trigger(kind)
+        if (ok) commandLog += LoggedCommand.event(kind, ticks)
+        return ok
+    }
+    internal fun atc(t: String) { log += RadioLine(time, true, t); revision++ }
+    internal fun pilot(t: String) { pending += Pending(time + config.readbackDelay, false, t) }
+    internal fun call(t: String) { log += RadioLine(time, false, t); revision++; attention++ }
 }

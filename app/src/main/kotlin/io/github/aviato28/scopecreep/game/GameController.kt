@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.aviato28.scopecreep.BuildConfig
 import io.github.aviato28.scopecreep.scope.Camera
 import io.github.aviato28.scopecreep.scope.ScopeScene
 import io.github.aviato28.scopecreep.sim.*
@@ -22,12 +23,19 @@ class GameController(
     val scene: ScopeScene, seed: Long = System.currentTimeMillis(),
     fleet: FleetDb = Fleet.default, profile: TrafficProfile = TrafficProfile.generic,
     val gameMode: GameMode = GameMode.SHIFT, val tutorial: Boolean = false, config: SimConfig = Modes.config(gameMode, tutorial),
+    /** A saved session to rebuild by replaying it headless (resume), or null for a fresh game. */
+    resume: ReplayData? = null,
+    val appVersion: String = BuildConfig.VERSION_NAME,
 ) {
     private var nowNanos = 0L
-    val sim = Simulation(scene.airport, seed, config, SimClock { nowNanos }, fleet, profile).also {
+    val sim: Simulation = if (resume != null) Replay.play(resume, scene.airport, fleet, profile, SimClock { nowNanos })
+    else Simulation(scene.airport, seed, config, SimClock { nowNanos }, fleet, profile).also {
         // start on the configuration the wind favours; from here on the player chooses (decision 20)
         it.setRunwayConfig(it.suggestedConfig(), silent = true)
     }
+
+    /** The session so far as a replay (bug report, save / resume). */
+    fun replay(): ReplayData = Replay.capture(sim, appVersion, gameMode.name, tutorial)
 
     /** The RWY sheet in the top bar. */
     var rwySheet by mutableStateOf(false)
@@ -89,6 +97,45 @@ class GameController(
     val avoidX = FloatArray(MAX_TAGS); val avoidY = FloatArray(MAX_TAGS); var avoidCount = 0; private set
     val selected: Aircraft? get() = sim.find(selectedId)
 
+    /** Taxilane segments blocked by a pushing / starting aircraft (dim red), rebuilt with the strips. */
+    val blockedPath = Path(); var hasBlocked = false; private set
+
+    // ---- arrival timeline (top of the scope): next ~10 min, rebuilt once per sim second ----
+    /** Hideable; kept per session only. */
+    var timelineOn by mutableStateOf(true)
+    var tlN = 0; private set
+    /** 0 = arrival marker, 1 = departure CTOT bracket, 2 = next arrival (not yet named), 3 = go-around rejoining. */
+    val tlKind = IntArray(TL_MAX); val tlId = IntArray(TL_MAX); val tlLane = IntArray(TL_MAX)
+    val tlT0 = DoubleArray(TL_MAX); val tlT1 = DoubleArray(TL_MAX); val tlCtot = DoubleArray(TL_MAX)
+    val tlLabel = arrayOfNulls<String>(TL_MAX)
+    val tlLaneName = arrayOfNulls<String>(3); var tlLanes = 1; private set
+    private fun tlLaneOf(des: String): Int {
+        for (i in 0 until tlLanes) if (tlLaneName[i] == des) return i
+        if (tlLanes < tlLaneName.size) { tlLaneName[tlLanes] = des; return tlLanes++ }
+        return tlLanes - 1
+    }
+    private fun tlAdd(kind: Int, id: Int, des: String, t0: Double, t1: Double, ctot: Double, label: String) {
+        if (tlN >= TL_MAX) return
+        val i = tlN++
+        tlKind[i] = kind; tlId[i] = id; tlLane[i] = tlLaneOf(des); tlT0[i] = t0; tlT1[i] = t1; tlCtot[i] = ctot; tlLabel[i] = label
+    }
+    private fun rebuildTimeline() {
+        tlN = 0; tlLanes = 0
+        tlLaneOf(sim.runwayConfig.dep); if (sim.runwayConfig.arr != sim.runwayConfig.dep) tlLaneOf(sim.runwayConfig.arr)
+        val now = sim.time
+        for (a in sim.aircraft) {
+            if (a.state == AcState.FINAL) tlAdd(0, a.id, a.rwyEnd, now + sim.etaS(a), now + sim.etaS(a), 0.0, a.callsign)
+            else if (!a.isArrival && a.ctot > 0.0 && a.state != AcState.AIRBORNE) {
+                val end = a.ctotTo
+                if (end > now - 1.0 && a.ctotFrom < now + TL_SPAN_S) tlAdd(1, a.id, sim.departureRunway(a), a.ctotFrom, end, a.ctot, a.callsign)
+                else if (end <= now - 1.0) tlAdd(1, a.id, sim.departureRunway(a), now, now, 0.0, a.callsign)   // window gone: pinned at "now"
+            }
+        }
+        sim.forEachRejoin { cs, eta -> tlAdd(3, -1, sim.arrivalEnd, now + eta, now + eta, 0.0, cs) }
+        val next = sim.nextArrivalEtaS()
+        if (next >= 0.0) tlAdd(2, -1, sim.arrivalEnd, now + next, now + next, 0.0, "ARR")
+    }
+
     // ---- strip bay (decision 22) ----
     private val noStrips: List<Aircraft> = emptyList()
     var bayLists: Array<List<Aircraft>> = Array(4) { noStrips }; private set
@@ -130,7 +177,7 @@ class GameController(
                 a == null -> false
                 mode == Mode.IDLE -> true
                 mode == Mode.PUSH -> a.state == AcState.REQUEST_PUSH
-                mode == Mode.EXIT -> a.state == AcState.ROLLOUT || (a.state == AcState.FINAL && a.cleared)
+                mode == Mode.EXIT -> a.state == AcState.ROLLOUT || a.state == AcState.ABORTED || (a.state == AcState.FINAL && a.cleared)
                 amend -> a.state == AcState.TAXIING || a.state == AcState.HOLDING_SHORT || a.state == AcState.HOLDING_XING
                 else -> a.state == (if (a.isArrival) AcState.VACATED else AcState.REQUEST_TAXI) && a.escort == null
             }
@@ -146,19 +193,21 @@ class GameController(
 
     companion object {
         const val MAX_OTHERS = 10; const val MAX_TAGS = 14
+        const val TL_MAX = 40; const val TL_SPAN_S = 600.0
         /** Off-screen arrivals on final are drawn clamped to the screen edge; the overlay and the tap handler share this clamp. */
         fun edgeX(x: Float, w: Float, d: Float) = x.coerceIn(26f * d, (w - 26f * d).coerceAtLeast(26f * d))
         fun edgeY(y: Float, h: Float, d: Float) = y.coerceIn(60f * d, (h - 96f * d).coerceAtLeast(60f * d))
 
         fun bayOf(a: Aircraft): Bay = when (a.state) {
-            AcState.FINAL, AcState.ROLLOUT, AcState.VACATING, AcState.GO_AROUND -> Bay.ARRIVALS
-            AcState.HOLDING_SHORT, AcState.LINED_UP, AcState.TAKEOFF_ROLL, AcState.HOLDING_XING, AcState.AIRBORNE -> Bay.RUNWAY
+            AcState.VACATING -> if (a.isArrival) Bay.ARRIVALS else Bay.RUNWAY
+            AcState.FINAL, AcState.ROLLOUT, AcState.GO_AROUND -> Bay.ARRIVALS
+            AcState.HOLDING_SHORT, AcState.LINED_UP, AcState.TAKEOFF_ROLL, AcState.HOLDING_XING, AcState.AIRBORNE, AcState.ABORTED -> Bay.RUNWAY
             AcState.TAXIING -> if (a.crossing) Bay.RUNWAY else Bay.TAXI
             AcState.VACATED -> Bay.TAXI
             AcState.AT_STAND, AcState.REQUEST_PUSH, AcState.PUSHING, AcState.REQUEST_TAXI -> Bay.APRON
         }
         /** The pilot is waiting for the controller (the REQ badge). */
-        fun needsController(a: Aircraft) = a.waitState != null || (a.state == AcState.FINAL && !a.cleared)
+        fun needsController(a: Aircraft) = a.waitState != null || (a.state == AcState.FINAL && !a.cleared) || (a.state == AcState.ABORTED && a.stopped && a.exitAtS.isInfinite())
 
         /** Fills [p] with the part of [poly] from arc length [s] on. No allocation beyond the Path's own growth. */
         fun fillRemaining(p: Path, poly: Polyline, s: Double) {
@@ -172,9 +221,12 @@ class GameController(
 
     private fun rebuildStrips() {
         val t = sim.time
+        blockedPath.rewind(); hasBlocked = false
+        for (a in sim.aircraft) if (a.state == AcState.PUSHING) for (e in a.blockEdges) { addEdgePath(blockedPath, sim.graph.edges[e]); hasBlocked = true }
+        rebuildTimeline()
         val lists = Array(4) { ArrayList<Aircraft>() }
         for (a in sim.aircraft) lists[bayOf(a).ordinal] += a
-        val cmp = compareBy<Aircraft>({ if (it.conflictWith != 0) 0 else if (needsController(it)) 1 else 2 }, { -(if (it.waitSince >= 0) t - it.waitSince else 0.0) }, { it.id })
+        val cmp = compareBy<Aircraft>({ if (it.conflictWith != 0) 0 else if (it.emergency > 0 && needsController(it)) 1 else if (needsController(it)) 2 else 3 }, { -(if (it.waitSince >= 0) t - it.waitSince else 0.0) }, { it.id })
         for (b in 0 until 4) {
             lists[b].sortWith(cmp)
             val req = lists[b].count { needsController(it) }

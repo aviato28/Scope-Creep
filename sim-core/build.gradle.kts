@@ -23,3 +23,15 @@ tasks.test {
     providers.gradleProperty("renderOut").orNull?.let { systemProperty("render.out", it) }
     testLogging { events("passed", "failed", "skipped") }
 }
+
+// Replay a bug-report file headless: ./gradlew :sim-core:replay -Pfile=/path/to/replay.json[.gz]   (see docs/debugging.md)
+tasks.register<JavaExec>("replay") {
+    group = "verification"
+    description = "Re-runs a replay file from the in-app \"Report a problem\" and prints the final state."
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.github.aviato28.scopecreep.sim.ReplayRunner")
+    workingDir = rootProject.projectDir
+    argumentProviders.add(CommandLineArgumentProvider {
+        listOfNotNull(providers.gradleProperty("file").orNull, providers.gradleProperty("airports").orNull, providers.gradleProperty("until").orNull?.let { "until=$it" })
+    })
+}

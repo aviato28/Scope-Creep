@@ -9,11 +9,12 @@ sealed interface SimEvent {
     val strike: Boolean get() = false
 }
 
-enum class GoAroundReason { COMMANDED, NO_CLEARANCE, RUNWAY_OCCUPIED, TAILWIND, CROSSWIND }
+/** [EVENT]: the runway is blocked by an operational event (closure, stopped emergency / rejected takeoff) or birds; not the controller's fault. */
+enum class GoAroundReason { COMMANDED, NO_CLEARANCE, RUNWAY_OCCUPIED, TAILWIND, CROSSWIND, EVENT }
 
 data class GoAroundEvent(override val time: Double, val callsign: String, val reason: GoAroundReason) : SimEvent {
     /** Go-arounds caused by the controller (no clearance, occupied runway, cleared into a tailwind or crosswind beyond limits) are strikes. */
-    override val strike get() = reason != GoAroundReason.COMMANDED
+    override val strike get() = reason != GoAroundReason.COMMANDED && reason != GoAroundReason.EVENT
 }
 data class LandedEvent(override val time: Double, val callsign: String, val runway: String) : SimEvent
 data class ArrivalParkedEvent(override val time: Double, val callsign: String, val stand: String) : SimEvent
@@ -40,4 +41,10 @@ enum class MovementKind { DEPARTURE, ARRIVAL, TOW }
 data class MovementEvent(
     override val time: Double, val callsign: String, val kind: MovementKind,
     val delayS: Double, val routeM: Double, val shortestM: Double, val warned: Boolean,
+    /** Departures only: 1 = airborne inside the CTOT window, -1 = outside it, 0 = no slot. */
+    val slot: Int = 0,
 ) : SimEvent
+
+/** Operational events (design.md section 8). [started] false = resolved. */
+enum class OpsKind(val label: String) { EMERGENCY("EMERGENCY"), REJECTED_TAKEOFF("REJECTED TAKEOFF"), LVP("LOW VISIBILITY"), RUNWAY_CLOSURE("RUNWAY CLOSED"), BIRDS("BIRD ACTIVITY") }
+data class OpsNoticeEvent(override val time: Double, val kind: OpsKind, val started: Boolean, val detail: String) : SimEvent

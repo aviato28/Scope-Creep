@@ -38,6 +38,12 @@ import io.github.aviato28.scopecreep.game.GameController
 import io.github.aviato28.scopecreep.game.GameMode
 import io.github.aviato28.scopecreep.game.Modes
 import io.github.aviato28.scopecreep.game.Prefs
+import io.github.aviato28.scopecreep.replay.ReplayStore
+import io.github.aviato28.scopecreep.sim.ReplayData
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.unit.dp as dpUnit
 import io.github.aviato28.scopecreep.ui.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,6 +72,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    override fun onStop() { ScopeHooks.onStop?.invoke(); super.onStop() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -80,6 +88,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** Lets the activity tell the Compose root that the app left the foreground (the shift is saved then). */
+object ScopeHooks { var onStop: (() -> Unit)? = null }
 
 private val Mono = FontFamily.Monospace
 
@@ -103,11 +114,30 @@ private fun ScopeApp() {
     val updateState by updater.state.collectAsState()
     LaunchedEffect(Unit) { updater.autoCheck() }
 
+    /** A shift saved when the app was paused or closed; offered on the menu and, once per launch, as a prompt. */
+    var saved by remember { mutableStateOf<ReplayData?>(ReplayStore.load(context)) }
+    var promptOpen by remember { mutableStateOf(saved != null) }
+
+    fun loadAssets(sc: ScopeScene): Pair<io.github.aviato28.scopecreep.sim.FleetDb, TrafficProfile> {
+        val fleet = runCatching { context.assets.open("data/airlines.json").use { Fleet.parse(it) } }.getOrDefault(Fleet.default)
+        val profile = runCatching { context.assets.open("airports/${sc.airport.meta.icao}/traffic.json").use { TrafficProfile.parse(it) } }.getOrDefault(TrafficProfile.generic)
+        return fleet to profile
+    }
+
+    fun resumeGame(d: ReplayData) {
+        val sc = scene ?: return
+        val (fleet, profile) = loadAssets(sc)
+        val m = runCatching { GameMode.valueOf(d.header.mode) }.getOrDefault(GameMode.SHIFT)
+        val ctl = runCatching { GameController(sc, d.header.seed, fleet, profile, gameMode = m, tutorial = d.header.tutorial, resume = d) }.getOrNull()
+        if (ctl == null) { ReplayStore.clear(context); saved = null; return }
+        game = ctl.also { it.autoDrop = prefs.autoDrop; it.bestForMode = prefs.bestFor(m); it.pause(true) }
+        promptOpen = false; newBest = false; screen = Screen.PLAY
+    }
+
     fun newGame(m: GameMode) {
         val sc = scene ?: return
         // airline telephony table (data/airlines.json) and this airport's traffic mix; fall back to the bundled defaults
-        val fleet = runCatching { context.assets.open("data/airlines.json").use { Fleet.parse(it) } }.getOrDefault(Fleet.default)
-        val profile = runCatching { context.assets.open("airports/${sc.airport.meta.icao}/traffic.json").use { TrafficProfile.parse(it) } }.getOrDefault(TrafficProfile.generic)
+        val (fleet, profile) = loadAssets(sc)
         val tutorial = m == GameMode.SHIFT && !prefs.onboardingDone
         game = GameController(sc, Modes.seed(m), fleet, profile, gameMode = m, tutorial = tutorial).also {
             it.autoDrop = prefs.autoDrop; it.bestForMode = prefs.bestFor(m); it.pause(true)
@@ -117,8 +147,17 @@ private fun ScopeApp() {
 
     val g = game
     LaunchedEffect(g) { if (g != null) while (true) withFrameNanos { g.frame(it) } }
+    // save the shift whenever it is paused, and when the app goes to the background; drop the save when the shift ends
+    LaunchedEffect(g, g?.paused, screen) {
+        if (g != null && screen == Screen.PLAY && g.paused && !g.over) { ReplayStore.save(context, g.replay()); saved = ReplayStore.load(context) }
+    }
+    DisposableEffect(g) {
+        ScopeHooks.onStop = { if (g != null && screen == Screen.PLAY && !g.over) { g.pause(true); ReplayStore.save(context, g.replay()) } }
+        onDispose { ScopeHooks.onStop = null }
+    }
     LaunchedEffect(g?.over) {
         if (g != null && g.over) {
+            ReplayStore.clear(context); saved = null
             newBest = prefs.submitBest(g.gameMode, g.sim.score.score)
             if (g.tutorial) prefs.updateOnboardingDone(true)
         }
@@ -139,13 +178,18 @@ private fun ScopeApp() {
                 val wide = LocalConfiguration.current.screenWidthDp >= 840
                 Row(Modifier.fillMaxSize()) {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
+                        val tlH = (if (g.timelineOn) TIMELINE_SHOWN_DP else TIMELINE_HIDDEN_DP).dpUnit
                         ScopeView(sc, theme, g)
-                        RadioLog(g, theme, Modifier.align(Alignment.TopStart).padding(6.dp))
-                        PreviewBanner(g, theme, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                        ArrivalTimeline(g, theme, Modifier.align(Alignment.TopStart))
+                        RadioLog(g, theme, Modifier.align(Alignment.TopStart).padding(start = 6.dpUnit, top = tlH + 6.dpUnit))
+                        Column(Modifier.align(Alignment.TopCenter).padding(top = tlH + 6.dpUnit), horizontalAlignment = Alignment.CenterHorizontally) {
+                            OpsBanner(g, theme)
+                            PreviewBanner(g, theme)
+                        }
                         HintBanner(g, theme, Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp))
                         ActionBar(g, theme, Modifier.align(Alignment.BottomCenter))
-                        RunwaySheet(g, theme, Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp))
-                        if (!wide) StripDrawer(g, theme, Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp))
+                        RunwaySheet(g, theme, Modifier.align(Alignment.TopEnd).padding(top = tlH + 6.dpUnit, end = 6.dpUnit))
+                        if (!wide) StripDrawer(g, theme, Modifier.align(Alignment.TopEnd).padding(top = tlH + 6.dpUnit, end = 6.dpUnit))
                         if (sc.airport.meta.status != "approved") {
                             BasicText(
                                 "DRAFT LAYOUT",
@@ -159,10 +203,15 @@ private fun ScopeApp() {
             }
             if (screen == Screen.BRIEFING) Briefing(theme, g, g.tutorial, onStart = { g.pause(false); screen = Screen.PLAY }, onBack = { screen = Screen.MENU })
             else if (g.over) Summary(theme, g, newBest, prefs.bestFor(g.gameMode), onAgain = { newGame(g.gameMode) }, onMenu = { screen = Screen.MENU })
-            else if (g.paused) PauseOverlay(theme, onResume = { g.pause(false) }, onQuit = { screen = Screen.MENU })
+            else if (g.paused) PauseOverlay(theme, onResume = { g.pause(false) }, onQuit = { screen = Screen.MENU }, onReport = { ReplayStore.share(context, g.replay()) })
         }
         when (screen) {
-            Screen.MENU -> MainMenu(theme, prefs, onPlay = { newGame(it) }, onSettings = { screen = Screen.SETTINGS }, onAbout = { screen = Screen.ABOUT })
+            Screen.MENU -> {
+                val sv = saved
+                MainMenu(theme, prefs, onPlay = { newGame(it) }, onSettings = { screen = Screen.SETTINGS }, onAbout = { screen = Screen.ABOUT },
+                    resumeLabel = sv?.let { "${it.header.mode}  ${"%d:%02d".format(it.header.endTime.toInt() / 60, it.header.endTime.toInt() % 60)} IN" }, onResume = { sv?.let { d -> resumeGame(d) } })
+                if (sv != null && promptOpen && scene != null) ResumePrompt(theme, onResume = { resumeGame(sv) }, onDiscard = { ReplayStore.clear(context); saved = null; promptOpen = false })
+            }
             Screen.SETTINGS -> SettingsScreen(theme, prefs, updater) { screen = Screen.MENU }
             Screen.ABOUT -> AboutScreen(theme, updater) { screen = Screen.MENU }
             else -> {}
@@ -205,6 +254,8 @@ private fun StatusBar(scene: ScopeScene?, game: GameController?, theme: ScopeThe
                 val shown = if (left >= 0) left.toInt() else sim.time.toInt()
                 BasicText((if (left >= 0) "T-" else "T+") + "%d:%02d".format(shown / 60, shown % 60), style = st.copy(Color(if (left in 0.0..30.0) theme.warn else theme.text), 12.sp, fontWeight = FontWeight.Bold))
                 BasicText("WIND ${sim.windText}", style = st)
+                val vis = sim.ops.visibilityM
+                BasicText(if (vis >= 10000) "VIS 10KM" else "VIS ${vis}M", style = st.copy(Color(if (vis < 10000) theme.warn else theme.dim), fontWeight = if (vis < 10000) FontWeight.Bold else FontWeight.Normal))
                 Column(
                     Modifier.size(width = 92.dp, height = 48.dp).clickable { game.toggleRwySheet() },
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
@@ -237,3 +288,18 @@ private fun StatusBar(scene: ScopeScene?, game: GameController?, theme: ScopeThe
     }
 }
 
+
+/** "Resume shift?" at launch when a shift was saved. */
+@Composable
+private fun ResumePrompt(theme: ScopeTheme, onResume: () -> Unit, onDiscard: () -> Unit) {
+    Dialog(onDismissRequest = onDiscard) {
+        Column(Modifier.background(Color(theme.panel)).border(1.dp, Color(theme.panelLine)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            BasicText("Resume shift?", style = TextStyle(Color(theme.text), 16.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+            BasicText("A shift was saved when you left. It is rebuilt exactly where it stopped.", style = TextStyle(Color(theme.dim), 12.sp, fontFamily = Mono))
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                BasicText("RESUME", Modifier.clickable(onClick = onResume).padding(vertical = 10.dp, horizontal = 4.dp), style = TextStyle(Color(theme.accent), 14.sp, fontWeight = FontWeight.Bold, fontFamily = Mono))
+                BasicText("DISCARD", Modifier.clickable(onClick = onDiscard).padding(vertical = 10.dp, horizontal = 4.dp), style = TextStyle(Color(theme.dim), 14.sp, fontWeight = FontWeight.Bold, fontFamily = Mono))
+            }
+        }
+    }
+}

@@ -48,11 +48,12 @@ private fun Page(t: ScopeTheme, modifier: Modifier = Modifier, content: @Composa
 }
 
 @Composable
-fun MainMenu(t: ScopeTheme, prefs: Prefs, onPlay: (GameMode) -> Unit, onSettings: () -> Unit, onAbout: () -> Unit) {
+fun MainMenu(t: ScopeTheme, prefs: Prefs, onPlay: (GameMode) -> Unit, onSettings: () -> Unit, onAbout: () -> Unit, resumeLabel: String? = null, onResume: () -> Unit = {}) {
     Page(t) {
         BasicText("SCOPE_CREEP", style = TextStyle(Color(t.accent), 34.sp, fontFamily = Mono, fontWeight = FontWeight.Bold, letterSpacing = 3.sp))
         BasicText("GROUND CONTROL", style = TextStyle(Color(t.label), 13.sp, fontFamily = Mono, letterSpacing = 6.sp))
         Spacer(Modifier.height(6.dp))
+        if (resumeLabel != null) PButton(t, "RESUME SHIFT", Modifier.widthIn(min = 280.dp), primary = true, sub = resumeLabel) { onResume() }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (m in GameMode.values()) {
                 val b = prefs.bestFor(m)
@@ -92,11 +93,12 @@ fun Briefing(t: ScopeTheme, g: GameController, firstTime: Boolean, onStart: () -
 }
 
 @Composable
-fun PauseOverlay(t: ScopeTheme, onResume: () -> Unit, onQuit: () -> Unit) {
+fun PauseOverlay(t: ScopeTheme, onResume: () -> Unit, onQuit: () -> Unit, onReport: () -> Unit = {}) {
     Box(Modifier.fillMaxSize().background(Color(t.bg).copy(alpha = 0.78f)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
         Column(Modifier.background(Color(t.panel)).border(1.dp, Color(t.panelLine)).padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             BasicText("PAUSED", style = TextStyle(Color(t.label), 18.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
             PButton(t, "RESUME", Modifier.widthIn(min = 180.dp), primary = true) { onResume() }
+            PButton(t, "REPORT A PROBLEM", Modifier.widthIn(min = 180.dp), sub = "SHARES A REPLAY OF THIS SHIFT") { onReport() }
             PButton(t, "QUIT TO MENU", Modifier.widthIn(min = 180.dp)) { onQuit() }
         }
     }
@@ -118,6 +120,7 @@ fun Summary(t: ScopeTheme, g: GameController, newBest: Boolean, best: Int, onAga
             row("Efficiency bonus", "+${s.efficiency}")()
             row("Delay penalty", "-${s.delay}")()
             row("Streak bonus (best x%.1f)".format(s.bestStreak), "+${s.multiplierBonus}")()
+            if (s.departures > 0) row("On-slot departures (CTOT)", if (s.onSlotPercent < 0) "-" else "${s.onSlotPercent}%  +${s.slotBonus} -${s.slotPenalty}", if (s.onSlotPercent in 0..49) t.warn else t.text)()
             row("Strikes ${s.strikes} of ${g.sim.config.maxStrikes}", "-${s.strikeTotal}", if (s.strikes > 0) t.warn else t.text)()
             row("Warnings", "${s.warnings}")()
             row("Go-arounds", "${g.sim.goArounds}")()

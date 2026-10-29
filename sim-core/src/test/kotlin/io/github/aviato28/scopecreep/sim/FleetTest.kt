@@ -27,7 +27,7 @@ class FleetTest {
         val a = Aircraft(1, rt, 2178, rt.types[0], "12", 0, Polyline(doubleArrayOf(0.0, 1.0), doubleArrayOf(0.0, 0.0)))
         assertEquals("IGO2178", a.callsign); assertEquals("IFLY 2178", a.spoken)
         val sim = Simulation(VoblAirportTest.load(), 5, SimConfig(arrivalsEnabled = false))
-        repeat(80) { sim.step() }
+        repeat(500) { sim.step() } // the first call comes at TSAT (up to 30 s after spawn)
         val ac = sim.aircraft.first()
         assertTrue(sim.log.any { it.text.contains(ac.spoken) && !it.text.contains(ac.callsign) }, sim.log.joinToString { it.text })
     }

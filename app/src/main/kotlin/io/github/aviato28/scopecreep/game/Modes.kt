@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import io.github.aviato28.scopecreep.sim.EventConfig
 import io.github.aviato28.scopecreep.sim.SimConfig
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 import java.time.LocalDate
@@ -30,7 +31,10 @@ object Modes {
 
     /** Sim tunables for a mode. [tutorial] (first-ever shift): low pressure, calm wind, strikes never end it. */
     fun config(mode: GameMode, tutorial: Boolean): SimConfig {
-        val base = SimConfig(shiftSeconds = if (mode == GameMode.ENDLESS) 0.0 else SHIFT_SECONDS, strikesEndShift = true)
+        // events on the 0-10 pressure scale (design.md section 8): the hard band (5+) opens after about 2-3 minutes of a shift
+        val startPressure = when (mode) { GameMode.SHIFT -> 3.5; GameMode.DAILY -> 4.0; GameMode.ENDLESS -> 3.0 }
+        val base = SimConfig(shiftSeconds = if (mode == GameMode.ENDLESS) 0.0 else SHIFT_SECONDS, strikesEndShift = true,
+            events = EventConfig(eventsEnabled = !tutorial, opsPressureStart = startPressure))
         if (!tutorial) return base
         return base.copy(
             spawnIntervalAt0 = 75.0, spawnIntervalAt1 = 75.0, arrivalIntervalAt0 = 240.0, arrivalIntervalAt1 = 240.0,

@@ -27,3 +27,13 @@ class FollowMe(val id: Int, val aircraftId: Int, var x: Double, var y: Double) {
         return (prevHeading + d * a + 360.0) % 360.0
     }
 }
+
+/** A static or slow-moving runway vehicle (fire service, inspection). [kind] 0 = fire, 1 = inspection. */
+class RunwayVehicle(val kind: Int, var x: Double, var y: Double, var heading: Double, val owner: Int = 0) {
+    var speed = 0.0
+    var path: Polyline? = null
+    var s = 0.0; var dir = 1.0
+    var prevX = x; var prevY = y
+    fun interpX(a: Double) = prevX + (x - prevX) * a
+    fun interpY(a: Double) = prevY + (y - prevY) * a
+}

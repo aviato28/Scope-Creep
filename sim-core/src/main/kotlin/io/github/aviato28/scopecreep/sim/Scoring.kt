@@ -17,8 +17,15 @@ class ScoreKeeper(private val c: SimConfig) {
     var strikeTotal = 0; private set
     var warnings = 0; private set
     var bestStreak = 1.0; private set
+    /** Departure slots: takeoffs inside / outside the CTOT window and the points they brought / cost. */
+    var slotOn = 0; private set
+    var slotOff = 0; private set
+    var slotBonus = 0; private set
+    var slotPenalty = 0; private set
+    /** Share of departures that took off inside their CTOT window (0..100), or -1 when none departed. */
+    val onSlotPercent get() = if (slotOn + slotOff == 0) -1 else Math.round(100.0 * slotOn / (slotOn + slotOff)).toInt()
     val movements get() = departures + arrivals + tows
-    val score get() = base + efficiency - delay + multiplierBonus - strikeTotal
+    val score get() = base + efficiency - delay + multiplierBonus - strikeTotal + slotBonus - slotPenalty
 
     /** True when the third strike (or [SimConfig.maxStrikes]) has landed and strikes end the shift. */
     val failed get() = c.strikesEndShift && strikes >= c.maxStrikes
@@ -44,6 +51,7 @@ class ScoreKeeper(private val c: SimConfig) {
             val total = movementScore(e.kind, e.delayS, e.routeM, e.shortestM, multiplier)
             base += b; efficiency += eff; delay += dl; multiplierBonus += total - (b + eff - dl)
             when (e.kind) { MovementKind.DEPARTURE -> departures++; MovementKind.ARRIVAL -> arrivals++; MovementKind.TOW -> tows++ }
+            if (e.slot > 0) { slotOn++; slotBonus += c.slots.ctotBonus } else if (e.slot < 0) { slotOff++; slotPenalty += c.slots.ctotPenalty }
             if (e.warned) { multiplier = 1.0; warnings++ }
             else { multiplier = minOf(c.streakCap, Math.round((multiplier + c.streakStep) * 1000.0) / 1000.0); if (multiplier > bestStreak) bestStreak = multiplier }
         } else if (e.strike && !failed) {

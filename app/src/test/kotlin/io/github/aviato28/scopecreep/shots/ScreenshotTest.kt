@@ -33,6 +33,11 @@ import io.github.aviato28.scopecreep.ui.SettingsScreen
 import io.github.aviato28.scopecreep.ui.StripPanel
 import io.github.aviato28.scopecreep.ui.StripDrawer
 import io.github.aviato28.scopecreep.ui.Summary
+import io.github.aviato28.scopecreep.sim.OpsKind
+import io.github.aviato28.scopecreep.ui.ArrivalTimeline
+import io.github.aviato28.scopecreep.ui.OpsBanner
+import io.github.aviato28.scopecreep.ui.TIMELINE_SHOWN_DP
+import io.github.aviato28.scopecreep.ui.PauseOverlay
 import io.github.aviato28.scopecreep.update.UpdateManager
 import java.io.File
 import org.junit.Rule
@@ -92,9 +97,11 @@ class ScreenshotTest {
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 ScopeView(g.scene, t, g)
-                RadioLog(g, t, Modifier.align(Alignment.TopStart).padding(6.dp))
+                ArrivalTimeline(g, t, Modifier.align(Alignment.TopStart))
+                RadioLog(g, t, Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = (TIMELINE_SHOWN_DP + 6).dp))
+                OpsBanner(g, t, Modifier.align(Alignment.TopCenter).padding(top = (TIMELINE_SHOWN_DP + 6).dp))
                 ActionBar(g, t, Modifier.align(Alignment.BottomCenter))
-                if (!wide) StripDrawer(g, t, Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp))
+                if (!wide) StripDrawer(g, t, Modifier.align(Alignment.TopEnd).padding(top = (TIMELINE_SHOWN_DP + 6).dp, end = 6.dp))
             }
             StripPanel(g, t, wide)
         }
@@ -103,6 +110,14 @@ class ScreenshotTest {
     private fun menu(dev: Dev) = shot("menu", dev) { t -> MainMenu(t, Prefs(context), onPlay = {}, onSettings = {}, onAbout = {}) }
     private fun briefing(dev: Dev) { val g = game(); shot("briefing", dev) { t -> Briefing(t, g, false, onStart = {}, onBack = {}) } }
     private fun scope(dev: Dev, theme: ScopeTheme = ScopeTheme.Phosphor) { val g = game(seconds = 90); shot("scope", dev, theme) { t -> GameScreen(g, t) } }
+    /** Low visibility forced at 90 s, then 20 s on: dimmed scope, banner, event chip. */
+    private fun lvp(dev: Dev) {
+        val g = game(seconds = 90); g.sim.triggerEvent(OpsKind.LVP)
+        var t = 200_000_000_000L
+        repeat(25 * 30) { t += 33_333_333L; g.frame(t) }
+        shot("scope_lvp", dev) { th -> GameScreen(g, th) }
+    }
+    private fun pause(dev: Dev) { shot("pause", dev) { th -> PauseOverlay(th, onResume = {}, onQuit = {}, onReport = {}) } }
     private fun about(dev: Dev) = shot("about", dev) { t -> AboutScreen(t, UpdateManager.get(context)) {} }
     private fun settings(dev: Dev) = shot("settings", dev) { t -> SettingsScreen(t, Prefs(context), UpdateManager.get(context)) {} }
     private fun summary(dev: Dev) { val g = game(seconds = 90); shot("summary", dev) { t -> Summary(t, g, false, 120, onAgain = {}, onMenu = {}) } }
@@ -114,6 +129,8 @@ class ScreenshotTest {
     @Test fun scopePhone() = scope(Dev.PHONE)
     @Test fun scopeTablet() = scope(Dev.TABLET)
     @Test fun scopePhoneModern() = scope(Dev.PHONE, ScopeTheme.ModernSurface)
+    @Test fun lvpPhone() = lvp(Dev.PHONE)
+    @Test fun pausePhone() = pause(Dev.PHONE)
     @Test fun aboutPhone() = about(Dev.PHONE)
     @Test fun aboutTablet() = about(Dev.TABLET)
     @Test fun settingsPhone() = settings(Dev.PHONE)

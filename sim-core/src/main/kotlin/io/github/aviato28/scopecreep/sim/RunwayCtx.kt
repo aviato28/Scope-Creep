@@ -60,7 +60,7 @@ class RwyCtx(val airport: Airport, val graph: TaxiGraph, val config: SimConfig, 
             if (hypot(x - end.threshold.x, y - end.threshold.y) > hypot(x - far.threshold.x, y - far.threshold.y)) continue
             val d = graph.search(n).dist
             if (rwNodes.none { d[it] <= config.maxHoldToRunwayM }) continue
-            cands += Destination(h.id, h.node, n, ref, ref, end.designator, x, y)
+            cands += Destination(h.id, h.node, n, ref, ref, end.designator, x, y, category = h.category)
         }
         destinations = cands.groupBy { it.ref }.values
             .map { g -> g.minBy { hypot(it.x - end.threshold.x, it.y - end.threshold.y) } }
