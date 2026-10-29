@@ -18,3 +18,4 @@ tools/airport-pipeline/cache/
 osm-raw/
 __pycache__/
 .kotlin/
+.claude/worktrees/
