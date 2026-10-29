@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    # Release by changing VERSION on any branch, or by pushing a v* tag.
-    branches: ['**']
+    # Release by changing VERSION on main (e.g. by merging a PR), or by pushing a v* tag.
+    branches: ['main']
     tags: ['v*']
     paths: ['VERSION']
   workflow_dispatch:
