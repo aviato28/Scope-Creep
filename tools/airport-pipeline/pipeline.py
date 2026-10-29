@@ -15,6 +15,8 @@ MAX_STAND_LEAD = 120.0 # m, stand lead-in search radius
 HOLD_MIN, HOLD_MAX, HOLD_GEN_M = 40.0, 130.0, 90.0  # m from runway centreline (decision 15)
 MAX_RWY_LINK = 25.0    # m, link dangling taxiway ends to the runway centreline
 DEF_WIDTH = {"taxiway": 23.0, "taxilane": 15.0}
+JOIN_TOL = 3.0         # m, auto-join: a dead-end within this of another taxi line is joined to it
+JOIN_NODE = 2.0        # m, a junction this close to an existing end node reuses that node
 
 
 def sha6(s):
@@ -104,6 +106,44 @@ def split_poly(poly, s):
     return poly, [poly[-1]]
 
 
+def seg_cross(a, b, c, d):
+    """proper intersection point of segments ab and cd, or None"""
+    r = (b[0] - a[0], b[1] - a[1]); q = (d[0] - c[0], d[1] - c[1])
+    den = r[0] * q[1] - r[1] * q[0]
+    if abs(den) < 1e-9:
+        return None
+    t = ((c[0] - a[0]) * q[1] - (c[1] - a[1]) * q[0]) / den
+    u = ((c[0] - a[0]) * r[1] - (c[1] - a[1]) * r[0]) / den
+    if 0 < t < 1 and 0 < u < 1:
+        return (a[0] + t * r[0], a[1] + t * r[1])
+    return None
+
+
+def split_edges(edges, inserts, fixed, npos):
+    """Split edges at inserts {eid: [(s, point)]}; node name = fixed[(eid, s)] or a hash of the point. Children get
+    ids <eid>.1, .2, ...; returns (new edge list, {(eid, s): node})."""
+    out, ins_nodes = [], {}
+    for e in edges:
+        ins = sorted(inserts.get(e["id"], []))
+        if not ins:
+            out.append(e); continue
+        cur = e["poly"]; prev = e["from"]; base = 0.0; part = 0
+        for s, q in ins:
+            left, right = split_poly(cur, s - base)
+            q = (round(q[0], 1), round(q[1], 1))
+            nn = fixed.get((e["id"], s)) or "n-" + sha6(f"{q[0]:.1f},{q[1]:.1f}")
+            if nn not in npos: npos[nn] = q
+            else: q = npos[nn]
+            left[-1] = q; right[0] = q
+            ins_nodes[(e["id"], s)] = nn
+            part += 1
+            out.append({**e, "id": f"{e['id']}.{part}", "from": prev, "to": nn, "poly": left})
+            cur, prev, base = right, nn, s
+        part += 1
+        out.append({**e, "id": f"{e['id']}.{part}", "from": prev, "to": e["to"], "poly": cur})
+    return out, ins_nodes
+
+
 def in_poly(p, poly):
     x, y = p; c = False
     for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
@@ -132,14 +172,18 @@ def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, 
     for wid, d in sorted(ov.get("ways", {}).items()):
         if wid not in ways_present: orphan.append("ways/" + wid); continue
         for e in edges:
-            if edge_way(e["id"]) == wid and e["id"] not in ov.get("edges", {}):
+            if edge_way(e["id"]) == wid and not any(e["id"] == k or e["id"].startswith(k + ".") for k in ov.get("edges", {})):
                 if "ref" in d: e["ref"], e["refSource"] = ref_of(d), "override"; n += 1
                 if d.get("closed"): e["closed"] = True; n += 1
     for eid, d in sorted(ov.get("edges", {}).items()):
-        if eid not in ebyid: orphan.append("edges/" + eid); continue
-        if "ref" in d: ebyid[eid]["ref"], ebyid[eid]["refSource"] = ref_of(d), "override"; n += 1
-        if "widthM" in d: ebyid[eid]["widthM"] = float(d["widthM"]); n += 1
-        if d.get("closed"): ebyid[eid]["closed"] = True; n += 1
+        # an id that an automatic split replaced by <id>.1, <id>.2 ... applies to all its pieces
+        tg = [ebyid[eid]] if eid in ebyid else [x for x in edges if x["id"].startswith(eid + ".")]
+        if not tg: orphan.append("edges/" + eid); continue
+        for e_ in tg:
+            if "ref" in d: e_["ref"], e_["refSource"] = ref_of(d), "override"; n += 1
+            if "widthM" in d: e_["widthM"] = float(d["widthM"]); n += 1
+            if d.get("closed"): e_["closed"] = True; n += 1
+            if d.get("escortOnly"): e_["escortOnly"] = True; n += 1
     hbyid = {h["id"]: h for h in holds}
     for hid, d in sorted(ov.get("holds", {}).items()):
         if hid not in hbyid: orphan.append("holds/" + hid); continue
@@ -167,6 +211,57 @@ def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, 
         if k in META_KEYS: meta_ov[META_KEYS[k]] = v; n += 1
         else: orphan.append("meta/" + k + " (not overridable)")
     if orphan: warn.append("unknown override ids (removed by an OSM update, or typo): " + ", ".join(orphan))
+    return n
+
+
+def apply_connects(ov, edges, npos, warn):
+    """overrides `connect`: [{from, to, escortOnly, _note}] where from/to are a node id or an edge id (an id since split
+    by the pipeline resolves to its pieces). Adds one link edge between the nearest points; splits an edge when needed.
+    Returns the number of links added."""
+    n = 0
+    def pieces(i):
+        if i in npos: return ("node", i)
+        pc = [e for e in edges if e["id"] == i or e["id"].startswith(i + ".")]
+        return ("edge", pc) if pc else None
+    def nearest(pt, pc):
+        return min((project_poly(pt, e["poly"]) + (e,) for e in pc), key=lambda r: r[0])
+    for c in ov.get("connect", []):
+        a, b = pieces(c.get("from", "")), pieces(c.get("to", ""))
+        if not a or not b:
+            warn.append("connect " + json.dumps([c.get("from"), c.get("to")]) + ": unknown id"); continue
+        if a[0] == "edge" and b[0] == "edge":   # closest end of one against the other
+            cand = []
+            for x, y in ((a[1], b[1]), (b[1], a[1])):
+                for e in x:
+                    for nd in (e["from"], e["to"]):
+                        d, s_, q, f = nearest(npos[nd], y)
+                        cand.append((d, nd, y))
+            d, nd, tgt = min(cand, key=lambda r: r[0])
+            src, dst = ("node", nd), ("edge", tgt)
+        elif a[0] == "edge": src, dst = b, a
+        else: src, dst = a, b
+        sp = npos[src[1]]
+        if dst[0] == "node":
+            tn = dst[1]
+        else:
+            d, s_, q, f = nearest(sp, dst[1])
+            L = plen(f["poly"])
+            ends = [(math.dist(q, npos[f["from"]]), f["from"]), (math.dist(q, npos[f["to"]]), f["to"])]
+            near = min(ends)
+            if near[0] <= JOIN_NODE: tn = near[1]
+            else:
+                q = (round(q[0], 1), round(q[1], 1)); tn = "n-" + sha6(f"{q[0]:.1f},{q[1]:.1f}"); npos[tn] = q
+                left, right = split_poly(f["poly"], s_); left[-1] = q; right[0] = q
+                i = edges.index(f); edges.remove(f)
+                edges[i:i] = [{**f, "id": f["id"] + ".1", "to": tn, "poly": left}, {**f, "id": f["id"] + ".2", "from": tn, "poly": right}]
+        if tn == src[1]: warn.append("connect " + json.dumps([c.get("from"), c.get("to")]) + ": already the same node"); continue
+        if any({e["from"], e["to"]} == {src[1], tn} for e in edges):
+            warn.append("connect " + json.dumps([c.get("from"), c.get("to")]) + ": already connected"); continue
+        kind = next((e["kind"] for e in edges if src[1] in (e["from"], e["to"]) and e["kind"] in ("taxiway", "taxilane")), "taxiway")
+        e = {"id": "e-conn-" + sha6(src[1] + tn), "from": src[1], "to": tn, "ref": None, "refSource": None, "kind": kind,
+             "widthM": DEF_WIDTH[kind], "poly": [list(npos[src[1]]), list(npos[tn])], "connect": True}
+        if c.get("escortOnly"): e["escortOnly"] = True
+        edges.append(e); n += 1
     return n
 
 
@@ -271,6 +366,82 @@ def main():
             edges.append({"id": f"e-osm-{wid}-{seq}", "from": fa, "to": fb, "ref": ref, "refSource": (src if ae != "runway" else "osm") if ref else None,
                           "kind": kind, "widthM": width, "poly": [list(p) for p in poly]})
 
+    # ---- auto-join: dead ends and crossings without a shared node (taxiways/taxilanes only; not runways, bridges,
+    # tunnels, other layers, disused or closed ways). Splits happen together with the stand splits below.
+    ov_pre = {}
+    _op = a.overrides or os.path.join(a.out, "overrides.json")
+    if os.path.exists(_op):
+        with open(_op, encoding="utf-8") as f:
+            ov_pre = json.load(f)
+    def closed_pre(e):
+        w = edge_way(e["id"]); oe = ov_pre.get("edges", {}); ow = ov_pre.get("ways", {})
+        return any(k == e["id"] and d.get("closed") for k, d in oe.items()) or bool(w in ow and ow[w].get("closed"))
+    def joinable(e):
+        if e["kind"] not in ("taxiway", "taxilane") or closed_pre(e): return False
+        t = ways.get(edge_way(e["id"]), ([], {}))[1]
+        return (t.get("bridge", "no") == "no" and t.get("tunnel", "no") == "no" and t.get("layer", "0") in ("0", "")
+                and t.get("disused") != "yes" and t.get("abandoned") != "yes" and not t.get("aeroway", "").startswith("disused"))
+    jcand = sorted((e for e in edges if joinable(e)), key=lambda e: e["id"])
+    bbox = {e["id"]: (min(q[0] for q in e["poly"]), min(q[1] for q in e["poly"]), max(q[0] for q in e["poly"]), max(q[1] for q in e["poly"])) for e in jcand}
+    jdeg = {}
+    for e in edges:
+        for n_ in (e["from"], e["to"]): jdeg[n_] = jdeg.get(n_, 0) + 1
+    jx = {}      # edge id -> [(point, existing node or None)]
+    autojoin = []
+    for e in jcand:
+        for end in ("from", "to"):
+            n_ = e[end]
+            if jdeg[n_] != 1: continue
+            pt = npos[n_]; best = None
+            for f in jcand:
+                if f is e or edge_way(f["id"]) == edge_way(e["id"]): continue
+                bb = bbox[f["id"]]
+                if pt[0] < bb[0] - JOIN_TOL or pt[0] > bb[2] + JOIN_TOL or pt[1] < bb[1] - JOIN_TOL or pt[1] > bb[3] + JOIN_TOL: continue
+                d, s_, q = project_poly(pt, f["poly"])
+                if best is None or d < best[0]: best = (d, q, f)
+            if best is None or best[0] > JOIN_TOL: continue
+            d, q, f = best
+            ne = min((math.dist(q, npos[f[k]]), f[k]) for k in ("from", "to"))
+            if ne[0] <= JOIN_NODE: tn = ne[1]
+            else:
+                q = (round(q[0], 1), round(q[1], 1)); tn = "n-" + sha6(f"{q[0]:.1f},{q[1]:.1f}"); npos[tn] = q
+                jx.setdefault(f["id"], []).append((q, None))
+            if tn == e["to" if end == "from" else "from"]: continue
+            e[end] = tn
+            e["poly"] = [list(npos[tn])] + e["poly"][1:] if end == "from" else e["poly"][:-1] + [list(npos[tn])]
+            jdeg[n_] -= 1; jdeg[tn] = jdeg.get(tn, 0) + 1
+            autojoin.append(f"endpoint {d:.1f} m  {e['ref'] or '-'} ({e['id']} {end}) -> {f['ref'] or '-'} ({f['id']}) at {npos[tn][0]:.0f},{npos[tn][1]:.0f}")
+    for i_, e in enumerate(jcand):
+        for f in jcand[i_ + 1:]:
+            if edge_way(e["id"]) == edge_way(f["id"]): continue
+            b1, b2 = bbox[e["id"]], bbox[f["id"]]
+            if b1[0] > b2[2] or b2[0] > b1[2] or b1[1] > b2[3] or b2[1] > b1[3]: continue
+            for a1, a2 in zip(e["poly"], e["poly"][1:]):
+                for c1, c2 in zip(f["poly"], f["poly"][1:]):
+                    q = seg_cross(a1, a2, c1, c2)
+                    if q is None: continue
+                    ne = min((math.dist(q, npos[e[k]]), e[k]) for k in ("from", "to")); nf = min((math.dist(q, npos[f[k]]), f[k]) for k in ("from", "to"))
+                    if ne[0] <= JOIN_NODE and nf[0] <= JOIN_NODE: continue
+                    if any(project_poly(q, [P(n_) for n_ in nd_])[0] < HOLD_MIN + 5 for _, nd_, _ in rwys):
+                        # a junction this close to a runway would leave no room for the runway hold: leave to review
+                        autojoin.append(f"skipped   {e['ref'] or '-'} ({e['id']}) x {f['ref'] or '-'} ({f['id']}) at {q[0]:.0f},{q[1]:.0f}: crossing within {HOLD_MIN + 5:.0f} m of a runway centreline")
+                        continue
+                    if ne[0] <= JOIN_NODE: jx.setdefault(f["id"], []).append((npos[ne[1]], ne[1]))
+                    elif nf[0] <= JOIN_NODE: jx.setdefault(e["id"], []).append((npos[nf[1]], nf[1]))
+                    else:
+                        q = (round(q[0], 1), round(q[1], 1)); nn_ = "n-" + sha6(f"{q[0]:.1f},{q[1]:.1f}"); npos[nn_] = q
+                        jx.setdefault(e["id"], []).append((q, nn_)); jx.setdefault(f["id"], []).append((q, nn_))
+                    autojoin.append(f"crossing  {e['ref'] or '-'} ({e['id']}) x {f['ref'] or '-'} ({f['id']}) at {q[0]:.0f},{q[1]:.0f}")
+    inserts, fixed = {}, {}
+    for eid, lst in sorted(jx.items()):
+        e = next(x for x in edges if x["id"] == eid)
+        for q, node in lst:
+            s_ = project_poly(q, e["poly"])[1]
+            if plen(e["poly"]) - s_ < JOIN_NODE or s_ < JOIN_NODE: continue
+            if any(abs(s_ - x[0]) < 1.5 for x in inserts.get(eid, [])): continue
+            inserts.setdefault(eid, []).append((s_, q))
+            if node: fixed[(eid, s_)] = node
+
     # ---- attach requests: stands (lead-in) and dangling taxiway ends near runway
     stands_raw = []
     for i, (lo, la, t) in sorted(nodes.items(), key=lambda kv: int(kv[0])):
@@ -307,7 +478,6 @@ def main():
                 best = (d, s, q, e)
         return best
 
-    inserts = {}  # edge id -> list of (s, point)
     plan = []
     for kind, p, payload in requests:
         pred = (lambda e: e["kind"] == "runway") if kind == "rwylink" else (lambda e: e["kind"] in ("taxiway", "taxilane", "rapidExit"))
@@ -328,24 +498,7 @@ def main():
                 hit = (s, q); ins.append(hit)
             target = ("ins", e["id"], hit[0])
         plan.append((kind, payload, p, (d, target)))
-    new_edges = []
-    ins_nodes = {}
-    for e in edges:
-        ins = sorted(inserts.get(e["id"], []))
-        if not ins:
-            new_edges.append(e); continue
-        cur = e["poly"]; prev = e["from"]; base = 0.0; part = 0
-        for s, q in ins:
-            left, right = split_poly(cur, s - base)
-            q = (round(q[0], 1), round(q[1], 1))
-            nn = "n-" + sha6(f"{q[0]:.1f},{q[1]:.1f}")
-            npos[nn] = q; ins_nodes[(e["id"], s)] = nn
-            part += 1
-            new_edges.append({**e, "id": f"{e['id']}.{part}", "from": prev, "to": nn, "poly": left})
-            cur, prev, base = right, nn, s
-        part += 1
-        new_edges.append({**e, "id": f"{e['id']}.{part}", "from": prev, "to": e["to"], "poly": cur})
-    edges = new_edges
+    edges, ins_nodes = split_edges(edges, inserts, fixed, npos)
 
     def target_node(t):
         return t[1] if t[0] == "node" else ins_nodes[(t[1], t[2])]
@@ -467,6 +620,7 @@ def main():
         with open(ov_path, encoding="utf-8") as f:
             ov = json.load(f)
         ov_n = apply_overrides(ov, edges, holds, stands_raw, ov_warn, meta_ov, ov_marks, rw_geo, used)
+        ov_n += apply_connects(ov, edges, npos, ov_warn)
     seen_ref = {}
     for h in holds:
         k = (h["runway"], h["ref"])
@@ -516,6 +670,7 @@ def main():
              "maxCode": None, "oneWay": False}
         if e["refSource"]: o["refSource"] = e["refSource"]
         if e.get("closed"): o["closed"] = True
+        if e.get("escortOnly"): o["escortOnly"] = True
         if len(e["poly"]) > 2: o["shape"] = [[round(x, 1), round(y, 1)] for x, y in e["poly"][1:-1]]
         gedges.append(o)
     for h in holds:
@@ -538,7 +693,7 @@ def main():
     for e in gedges:
         if e["from"] not in ids or e["to"] not in ids: errs.append(f"{e['id']}: missing node")
     for e in edges:
-        if e["kind"] in ("taxiway", "taxilane") and not e["ref"] and not e.get("lead") and not e["id"].startswith("e-link-"):
+        if e["kind"] in ("taxiway", "taxilane") and not e["ref"] and not e.get("lead") and not e.get("connect") and not e["id"].startswith("e-link-"):
             unres.append(f"{e['id']}: taxiway edge without ref (OSM and propagation)")
     unres += [f"s-osm-{i}: stand without ref" for i, p, r, ae in stands_raw if not r]
     unres += [f"s-osm-{s}: no taxiway within {MAX_STAND_LEAD:.0f} m, stand not connected" for s in lead_missing]
@@ -558,13 +713,15 @@ def main():
         parts.append(json.dumps(k) + ":" + body)
     with open(os.path.join(a.out, "airport.json"), "w", encoding="utf-8", newline="\n") as f:
         f.write("{\n" + ",\n".join(parts) + "\n}\n")
+    with open(os.path.join(a.out, "review", "autojoin.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(sorted(autojoin)) + "\n")
     with open(os.path.join(a.out, "review", "unresolved.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(sorted(unres)) + "\n")
     c = lambda k: sum(1 for e in gedges if e["kind"] == k)
     print(f"{a.icao}: runways={len(runways)} nodes={len(gnodes)} edges={len(gedges)} (taxiway={c('taxiway')} taxilane={c('taxilane')} runway={c('runway')})"
           f" holds={len(holds)} stands={len(stands)} (no ref {sum(1 for s in stands if not s['ref'])}, unconnected {len(lead_missing)})"
           f" aprons={len(aprons)} buildings={len(blds)}")
-    print(f"overrides applied={ov_n}")
+    print(f"overrides applied={ov_n} auto-joined: endpoints={sum(1 for x in autojoin if x.startswith('endpoint'))} crossings={sum(1 for x in autojoin if x.startswith('crossing'))}")
     for w in ov_warn: print("WARNING overrides:", w, file=sys.stderr)
     print(f"propagated refs={sum(1 for e in gedges if e.get('refSource')=='propagated')} unresolved={len(unres)} dup-skipped={dup} zero-skipped={zero} rwy-links={rwylinks}")
     for e in errs: print("ERROR", e)

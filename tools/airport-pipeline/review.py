@@ -2,7 +2,7 @@
 """Review sheet for airports/<ICAO>: review.svg/png, north-runway-holds.png, unnamed.md. Stdlib + node/playwright for PNG.
 Usage: python3 -I review.py --airport airports/VOBL --tmp DIR   (DIR: scratch dir for the crop SVG)
 Short ids (H#n unnamed runway holds, W#n unnamed OSM ways) are numbered over sorted stable ids, so they are stable per input."""
-import argparse, html, json, math, os, subprocess, sys
+import argparse, heapq, html, json, math, os, re, subprocess, sys
 
 BG, APRON, BLD, TAXI_BAND, TAXI, LANE = "#05090a", "#071312", "#0c1f1c", "#0a1d17", "#2a7d57", "#1f5a3a"
 RWY, RWY_EDGE, HOLD, TEXT, DIM, MAG = "#07130f", "#39d98a", "#ffb43a", "#9af0c0", "#4f8f6e", "#ff2bd6"
@@ -67,7 +67,7 @@ def analyse(d, N, E):
     return rw, rpoly, named, holds, hid, wayedges, wids, wid, nearest_named
 
 
-def svg_doc(d, N, E, A, vb, wpx, title_legend=True):
+def svg_doc(d, N, E, A, vb, wpx, title_legend=True, overlay=None):
     rw, rpoly, named, holds, hid, wayedges, wids, wid, nearest_named = A
     x0, y0, x1, y1 = vb; W, H = x1 - x0, y1 - y0
     k = wpx / W; hpx = int(H * k)
@@ -140,6 +140,7 @@ def svg_doc(d, N, E, A, vb, wpx, title_legend=True):
         rp = rpoly[h["runway"]]; side = 1 if proj(a_, rp)[0] > proj(b_, rp)[0] else -1
         lp = (p[0] + side * n[0] * (hl + 22), p[1] + side * n[1] * (hl + 22))
         o.append(lab(*lp, t, c, 22 if unnamed else 18))
+    if overlay: o += overlay(X, Y, lab, inb, k)
     if title_legend:
         o.append(f'<g font-size="20"><rect x="20" y="20" width="900" height="190" fill="{BG}" fill-opacity="0.9" stroke="{LANE}"/>'
                  f'<text x="36" y="52" fill="{TEXT}" font-size="26" font-weight="bold">{d["meta"]["icao"]} review sheet (draft, north up)</text>'
@@ -187,6 +188,105 @@ def describe(d, N, E, A):
     return "\n".join(out) + "\n", info
 
 
+NEAR_MAX = 25.0
+JNOTES = {}
+
+
+def find_junctions(d, N, E, rev):
+    """Remaining near-misses after the pipeline's auto-join: dead-end taxi edges within NEAR_MAX m of another taxi line,
+    plus crossings the pipeline skipped (near a runway). Returns dicts sorted by a stable key, numbered J#1.."""
+    taxi = [e for e in E if e["kind"] in ("taxiway", "taxilane") and not e.get("closed") and not e["id"].startswith("e-lead-")]
+    deg = {}
+    for e in E:
+        if e["id"].startswith("e-lead-"): continue   # stand lead-ins do not make a node a junction
+        for n in (e["from"], e["to"]): deg[n] = deg.get(n, 0) + 1
+    holdn = {h["node"] for h in d["holds"] if h["node"]}; standn = {s["node"] for s in d["stands"] if s["node"]}
+    rwn = {n for e in E if e["kind"] == "runway" for n in (e["from"], e["to"])}
+    out = {}
+    for e in taxi:
+        for end in ("from", "to"):
+            n = e[end]
+            if deg[n] != 1 or n in holdn or n in standn or n in rwn: continue
+            p = N[n]; best = None
+            adj = {n, e["from"], e["to"]}
+            for f in taxi:
+                if f is e or f["from"] in adj or f["to"] in adj: continue
+                dd, s_ = proj(p, f["poly"])
+                if best is None or dd < best[0]: best = (dd, s_, f)
+            if not best or best[0] > NEAR_MAX: continue
+            dd, s_, f = best
+            q, _ = at(f["poly"], s_)
+            tgt = f["id"]; kind = "dead end"
+            for k_ in ("from", "to"):
+                m = f[k_]
+                if math.dist(q, N[m]) <= 3.0:
+                    tgt = m; kind = "dead end to dead end" if deg[m] == 1 else "dead end to junction"
+            key = "~".join(sorted([n, tgt])) if kind == "dead end to dead end" else n + "~" + tgt
+            if key in out: continue
+            out[key] = {"kind": kind, "from": n, "to": tgt, "d": dd, "p": p, "q": q, "ref": e["ref"], "edge": e["id"],
+                        "toref": f["ref"], "toedge": f["id"]}
+    # close but far apart by path: a node within NEAR_MAX m of another taxi line whose nearest end is more than
+    # max(120 m, 5 x the gap) away along the graph (parallel lanes, a missing connector). One entry per ref pair.
+    adj = {}
+    for e in E:
+        if e["kind"] == "runway" or e["id"].startswith("e-lead-"): continue
+        L = plen(e["poly"]); adj.setdefault(e["from"], []).append((e["to"], L)); adj.setdefault(e["to"], []).append((e["from"], L))
+    def dij(src, lim):
+        dist = {src: 0.0}; h = [(0.0, src)]
+        while h:
+            dd, u = heapq.heappop(h)
+            if dd > dist[u] or dd > lim: continue
+            for v, L in adj.get(u, []):
+                if dd + L < dist.get(v, 1e18): dist[v] = dd + L; heapq.heappush(h, (dd + L, v))
+        return dist
+    pairs = {}
+    for n in sorted({x for e in taxi for x in (e["from"], e["to"])}):
+        if n in holdn or n in rwn: continue
+        dist = None
+        for f in taxi:
+            if n in (f["from"], f["to"]): continue
+            dd, s_ = proj(N[n], f["poly"])
+            if dd > NEAR_MAX or dd < 1.0: continue
+            if dist is None: dist = dij(n, 400.0)
+            pd = min(dist.get(f["from"], 1e18), dist.get(f["to"], 1e18))
+            if pd <= max(120.0, 5 * dd): continue
+            own = tuple(sorted({e["ref"] or "-" for e in taxi if n in (e["from"], e["to"])}))
+            pk = (own, f["ref"] or "-")
+            if pk not in pairs or dd < pairs[pk][0]:
+                q, _ = at(f["poly"], s_)
+                pairs[pk] = (dd, n, f, q, own)
+    for pk, (dd, n, f, q, own) in sorted(pairs.items()):
+        key = "near~" + n + "~" + f["id"]
+        out[key] = {"kind": "close, far by path", "from": n, "to": f["id"], "d": dd, "p": N[n], "q": q, "ref": "/".join(own),
+                    "edge": "", "toref": f["ref"], "toedge": f["id"]}
+    ap = os.path.join(rev, "autojoin.txt")
+    if os.path.exists(ap):
+        for ln in open(ap, encoding="utf-8"):
+            m = re.match(r"skipped\s+(\S+) \((\S+)\) x (\S+) \((\S+)\) at (-?\d+),(-?\d+): (.*)", ln.strip())
+            if m:
+                key = f"crossing~{m.group(2)}~{m.group(4)}"
+                pt = (float(m.group(5)), float(m.group(6)))
+                out[key] = {"kind": "crossing not joined", "from": m.group(2), "to": m.group(4), "d": 0.0, "p": pt, "q": pt,
+                            "ref": m.group(1), "edge": m.group(2), "toref": m.group(3), "toedge": m.group(4)}
+    return [dict(v, id=f"J#{i + 1}", key=k) for i, (k, v) in enumerate(sorted(out.items()))]
+
+
+def junction_md(J):
+    lines = ["# Junction near-misses (VOBL)", "",
+             "Generated by `tools/airport-pipeline/review.py`. The pipeline already joined dead ends within 3 m of another taxi line and "
+             "crossings without a shared node (`review/autojoin.txt`). What is left: a dead-end taxi edge 0-25 m from another taxi line, "
+             "or a crossing skipped because it is too close to a runway. Ids J#n are numbered over sorted keys (stable for the same input; "
+             "the key is in the last column). To join one, add to `overrides.json`: "
+             "`\"connect\": [{\"from\": \"<node or edge id>\", \"to\": \"<node or edge id>\", \"escortOnly\": false}]`. "
+             "The Chart column is the maintainer's / reviewer's comparison notes (`junction-notes.json`, keyed by the key).", "",
+             f"{len(J)} open.", "",
+             "| Id | Kind | Where (x, y m) | From | To | Gap | Chart | Key |", "|---|---|---|---|---|---|---|---|"]
+    for j in J:
+        lines.append(f"| {j['id']} | {j['kind']} | {j['p'][0]:.0f}, {j['p'][1]:.0f} | {j['ref'] or '-'} `{j['from']}` | "
+                     f"{j['toref'] or '-'} `{j['to']}` | {j['d']:.0f} m | {JNOTES.get(j['key'], 'open: maintainer to check')} | `{j['key']}` |")
+    return "\n".join(lines) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--airport", required=True); ap.add_argument("--tmp", required=True)
     ap.add_argument("--width", type=int, default=3000); a = ap.parse_args()
@@ -200,6 +300,21 @@ def main():
     open(os.path.join(rev, "review.svg"), "w", encoding="utf-8", newline="\n").write(svg + "\n")
     md, info = describe(d, N, E, A)
     open(os.path.join(rev, "unnamed.md"), "w", encoding="utf-8", newline="\n").write(md)
+    J = find_junctions(d, N, E, rev)
+    nf = os.path.join(a.airport, "junction-notes.json")
+    if os.path.exists(nf): JNOTES.update(json.load(open(nf, encoding="utf-8")))
+    open(os.path.join(rev, "junctions.md"), "w", encoding="utf-8", newline="\n").write(junction_md(J))
+    def jover(X, Y, lab, inb, k):
+        r = []
+        for j in J:
+            if not inb(j["p"]): continue
+            r.append(f'<circle cx="{X(j["p"][0])}" cy="{Y(j["p"][1])}" r="14" fill="none" stroke="{MAG}" stroke-width="3"/>')
+            if j["d"] > 1:
+                r.append(f'<line x1="{X(j["p"][0])}" y1="{Y(j["p"][1])}" x2="{X(j["q"][0])}" y2="{Y(j["q"][1])}" stroke="{MAG}" stroke-width="2" stroke-dasharray="6 4"/>')
+            r.append(lab(j["p"][0], j["p"][1] + 30 / k, j["id"], MAG, 20))
+        return r
+    jsvg, jh = svg_doc(d, N, E, A, vb, a.width, overlay=jover)
+    js_ = os.path.join(a.tmp, "junctions.svg"); open(js_, "w", encoding="utf-8").write(jsvg)
     # north runway crop
     north = max(d["runways"], key=lambda r: sum(q[1] for q in r["centerline"]) / len(r["centerline"]))
     cl = north["centerline"]; cx0, cx1 = min(q[0] for q in cl) - 150, max(q[0] for q in cl) + 150
@@ -211,7 +326,7 @@ def main():
     csvg, chpx = svg_doc(d, N, E, A, cvb, 5000, title_legend=False)
     cs = os.path.join(a.tmp, "north.svg"); open(cs, "w", encoding="utf-8").write(csvg)
     here = os.path.dirname(os.path.abspath(__file__)); js = os.path.join(here, "render_png.js")
-    for src, out, w, h in ((os.path.join(rev, "review.svg"), os.path.join(rev, "review.png"), a.width, hpx), (cs, os.path.join(rev, "north-runway-holds.png"), 5000, chpx)):
+    for src, out, w, h in ((os.path.join(rev, "review.svg"), os.path.join(rev, "review.png"), a.width, hpx), (cs, os.path.join(rev, "north-runway-holds.png"), 5000, chpx), (js_, os.path.join(rev, "junctions.png"), a.width, jh)):
         subprocess.run(["node", js, src, out, str(w), str(h)], check=True)
     nh = [v for k, v in info.items() if v[1].startswith("runway " + "/".join(x["designator"] for x in north["ends"]))]
     print(f"unnamed holds={len(A[3])} unnamed ways={len(A[6])} north runway {'/'.join(x['designator'] for x in north['ends'])} holds: "
