@@ -1,9 +1,199 @@
 {
+  "_source": "Checked against AAI eAIP VOBL charts (AD 2 VOBL 1-101 Aerodrome Chart and 1-301 Aircraft Parking/Docking Chart, both 27 NOV 2025; eAIP package AIRAC effective 29 OCT 2026)",
   "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py; refs set here get refSource \"override\". Sections: holds {id:{ref|delete}}, edges {id:{ref,widthM}}, ways {osmWayId:{ref}}, stands {id:{ref}}, meta {elevationM,magneticVariationDeg,name}.",
   "schemaVersion": 1,
   "meta": {},
-  "ways": {},
+  "ways": {
+    "1059165753": {
+      "ref": "B6"
+    },
+    "1059165759": {
+      "ref": "A"
+    },
+    "870716358": {
+      "ref": "A6"
+    },
+    "870716359": {
+      "ref": "A7"
+    },
+    "870716360": {
+      "ref": "A8"
+    },
+    "870716362": {
+      "ref": "A9"
+    },
+    "979704892": {
+      "ref": "H10"
+    },
+    "837936030": {
+      "ref": "H9"
+    },
+    "979704889": {
+      "ref": "H9"
+    },
+    "870716331": {
+      "ref": "H7"
+    },
+    "870716334": {
+      "ref": "H4"
+    },
+    "979704900": {
+      "ref": "Q"
+    },
+    "838283540": {
+      "ref": "B3"
+    },
+    "838283550": {
+      "ref": "B3"
+    },
+    "1175618550": {
+      "ref": "N"
+    }
+  },
   "edges": {},
-  "holds": {},
-  "stands": {}
+  "holds": {
+    "h-osm-14300164156": {
+      "ref": "A2"
+    },
+    "h-gen-e-osm-1175618534-3": {
+      "ref": "A10"
+    },
+    "h-gen-e-osm-1175618535-1": {
+      "ref": "A10"
+    },
+    "h-gen-e-osm-837936024-1": {
+      "ref": "H3"
+    },
+    "h-gen-e-osm-979704889-1": {
+      "ref": "H9"
+    },
+    "h-gen-e-osm-979704892-1": {
+      "ref": "H10"
+    },
+    "h-osm-9731765297": {
+      "ref": "A11"
+    }
+  },
+  "stands": {
+    "s-osm-8498864569": {
+      "ref": "506"
+    },
+    "s-osm-7823673382": {
+      "ref": "69A"
+    },
+    "s-osm-7823673383": {
+      "ref": "71A"
+    },
+    "s-osm-7823673384": {
+      "ref": "72A"
+    },
+    "s-osm-7823676585": {
+      "ref": "74A"
+    },
+    "s-osm-7823676586": {
+      "ref": "75A"
+    },
+    "s-osm-7823676587": {
+      "ref": "77A"
+    },
+    "s-osm-7823676588": {
+      "ref": "78A"
+    },
+    "s-osm-7823676589": {
+      "ref": "80A"
+    },
+    "s-osm-7823676590": {
+      "ref": "81A"
+    },
+    "s-osm-7823676591": {
+      "ref": "83A"
+    },
+    "s-osm-7823676592": {
+      "ref": "84A"
+    },
+    "s-osm-7823676593": {
+      "ref": "86A"
+    },
+    "s-osm-11083520366": {
+      "ref": "V36"
+    },
+    "s-osm-11083520367": {
+      "ref": "V37"
+    },
+    "s-osm-11083520368": {
+      "ref": "V38"
+    },
+    "s-osm-11083520369": {
+      "ref": "V39"
+    },
+    "s-osm-11083520370": {
+      "ref": "V40"
+    },
+    "s-osm-11083520371": {
+      "ref": "V41"
+    },
+    "s-osm-11083520372": {
+      "ref": "V42"
+    },
+    "s-osm-11083520373": {
+      "ref": "V43"
+    },
+    "s-osm-11083520374": {
+      "ref": "V44"
+    },
+    "s-osm-11083520375": {
+      "ref": "V45"
+    },
+    "s-osm-11083520376": {
+      "ref": "V46"
+    },
+    "s-osm-11083520377": {
+      "ref": "V47"
+    },
+    "s-osm-11083520378": {
+      "ref": "V49"
+    },
+    "s-osm-11083520379": {
+      "ref": "V50"
+    },
+    "s-osm-11083520380": {
+      "ref": "V51"
+    },
+    "s-osm-11083520381": {
+      "ref": "V52"
+    },
+    "s-osm-11083520382": {
+      "ref": "V53"
+    },
+    "s-osm-11083520383": {
+      "ref": "V54"
+    },
+    "s-osm-11083520384": {
+      "ref": "V55"
+    },
+    "s-osm-11083520385": {
+      "ref": "V56"
+    },
+    "s-osm-11083520387": {
+      "ref": "V57"
+    },
+    "s-osm-11083520386": {
+      "ref": "V58"
+    },
+    "s-osm-11083520389": {
+      "ref": "V59"
+    },
+    "s-osm-11083520390": {
+      "ref": "V60"
+    },
+    "s-osm-11083520391": {
+      "ref": "V61"
+    },
+    "s-osm-11083520392": {
+      "ref": "V62"
+    },
+    "s-osm-11083520393": {
+      "ref": "V63"
+    }
+  }
 }
