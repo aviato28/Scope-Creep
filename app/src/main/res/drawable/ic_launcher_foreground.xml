@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icon concept 2 "Hold Short" (from mockups/branding/icon-2-*.svg). Swap this file to rebrand. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M23,54a31,31 0 1,0 62,0a31,31 0 1,0 -62,0"
+        android:strokeColor="#39D98A"
+        android:strokeWidth="3" />
+    <path
+        android:pathData="M34,72V58H58V44"
+        android:strokeColor="#9AF0C0"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M47,34H69"
+        android:strokeColor="#FFB43A"
+        android:strokeWidth="6"
+        android:strokeLineCap="round" />
+</vector>
