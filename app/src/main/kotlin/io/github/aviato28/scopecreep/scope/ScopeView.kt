@@ -14,16 +14,18 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import io.github.aviato28.scopecreep.game.GameController
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 import kotlinx.coroutines.launch
 
 /** Pan / pinch-zoom / double-tap-zoom scope. Static geometry comes from the cached [scene]. */
 @Composable
-fun ScopeView(scene: ScopeScene, theme: ScopeTheme, modifier: Modifier = Modifier) {
+fun ScopeView(scene: ScopeScene, theme: ScopeTheme, game: GameController, modifier: Modifier = Modifier) {
     val density = LocalDensity.current.density
     val camera = remember(scene) { Camera(scene.bounds) }
     val renderer = remember(scene) { ScopeRenderer(scene, theme, density) }
-    renderer.setTheme(theme)
+    val overlay = remember(scene) { GameOverlay(density, theme) }
+    renderer.setTheme(theme); overlay.setTheme(theme)
     val scope = rememberCoroutineScope()
     val anim = remember { Animatable(0f) }
 
@@ -37,7 +39,7 @@ fun ScopeView(scene: ScopeScene, theme: ScopeTheme, modifier: Modifier = Modifie
                 }
             }
             .pointerInput(camera) {
-                detectTapGestures(onDoubleTap = { p ->
+                detectTapGestures(onTap = { p -> game.tap(p.x, p.y, camera, 48f * density) }, onDoubleTap = { p ->
                     val from = camera.zoom
                     // zoom in to 2.5x (or back to fit when already well zoomed in)
                     val to = if (from > camera.fitZoom * 2f) camera.fitZoom else minOf(from * 2.5f, camera.maxZoom)
@@ -53,7 +55,8 @@ fun ScopeView(scene: ScopeScene, theme: ScopeTheme, modifier: Modifier = Modifie
             },
     ) {
         camera.setViewSize(size.width, size.height, density)
+        game.frame // redraw every frame
         camera.version // read state so camera changes redraw this scope only
-        drawIntoCanvas { renderer.draw(it.nativeCanvas, camera) }
+        drawIntoCanvas { renderer.draw(it.nativeCanvas, camera); overlay.draw(it.nativeCanvas, camera, game) }
     }
 }

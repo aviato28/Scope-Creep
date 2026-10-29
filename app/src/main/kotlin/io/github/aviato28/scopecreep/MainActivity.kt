@@ -24,6 +24,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import io.github.aviato28.scopecreep.game.GameController
+import io.github.aviato28.scopecreep.ui.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -74,27 +77,35 @@ private fun ScopeApp() {
             ScopeScene(context.assets.open("airports/VOBL/airport.json").use { AirportLoader.load(it) })
         }
     }
+    val game = remember(scene) { scene?.let { GameController(it) } }
+    LaunchedEffect(game) { if (game != null) while (true) withFrameNanos { game.frame(it) } }
     val bg = Color(theme.bg); val dim = Color(theme.dim); val txt = Color(theme.text)
     Column(Modifier.fillMaxSize().background(bg)) {
         StatusBar(scene, theme)
         val wide = LocalConfiguration.current.screenWidthDp >= 840
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                scene?.let { ScopeView(it, theme) }
+                val sc = scene
+                if (sc != null && game != null) {
+                    ScopeView(sc, theme, game)
+                    RadioLog(game, theme, Modifier.align(Alignment.TopStart).padding(6.dp))
+                    PreviewBanner(game, theme, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                    ActionBar(game, theme, Modifier.align(Alignment.BottomCenter))
+                }
                 if (scene?.airport?.meta?.status != "approved" && scene != null) {
                     BasicText(
                         "DRAFT LAYOUT",
-                        Modifier.align(Alignment.TopStart).padding(10.dp).border(1.dp, Color(theme.hold)).padding(horizontal = 6.dp, vertical = 2.dp),
+                        Modifier.align(Alignment.TopEnd).padding(10.dp).border(1.dp, Color(theme.hold)).padding(horizontal = 6.dp, vertical = 2.dp),
                         style = TextStyle(Color(theme.hold), 10.sp, fontFamily = Mono, fontWeight = FontWeight.Bold),
                     )
                 }
                 BasicText(
                     "© OpenStreetMap contributors",
-                    Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                    Modifier.align(Alignment.BottomEnd).padding(bottom = 80.dp, end = 8.dp),
                     style = TextStyle(dim, 10.sp, fontFamily = Mono),
                 )
             }
-            if (wide) StripBayPlaceholder(theme)
+            if (game != null) StripPanel(game, theme, wide)
         }
     }
 }
@@ -121,9 +132,3 @@ private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme) {
     }
 }
 
-@Composable
-private fun StripBayPlaceholder(theme: ScopeTheme) {
-    Column(Modifier.width(320.dp).fillMaxHeight().background(Color(theme.panel)).border(1.dp, Color(theme.panelLine)).padding(12.dp)) {
-        BasicText("FLIGHT STRIP BAY", style = TextStyle(Color(theme.dim), 11.sp, fontFamily = Mono))
-    }
-}
