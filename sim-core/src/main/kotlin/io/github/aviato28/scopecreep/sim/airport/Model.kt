@@ -61,6 +61,8 @@ data class GraphEdge(
     val closed: Boolean = false,
     /** Only usable behind a follow-me vehicle (maintainer override); normal routing never uses it. */
     val escortOnly: Boolean = false,
+    /** Runway centreline edge that may be taxied along under a BACKTRACK clearance. */
+    val backtrackAllowed: Boolean = false,
 )
 
 @Serializable data class Graph(val nodes: List<GraphNode>, val edges: List<GraphEdge>)
@@ -97,6 +99,10 @@ data class Stand(
 @Serializable
 data class Label(val id: String, val forRef: String, val x: Double, val y: Double, val rotationDeg: Double = 0.0, val placement: String = "auto")
 
+/** Turn pad at a runway end: backtracking aircraft turn 180 degrees here and line up facing [headingTrue] (the departure heading of [end]). */
+@Serializable
+data class TurnPad(val id: String, val runway: String, val end: String, val node: String, val headingTrue: Double = 0.0, val confirmed: Boolean = false)
+
 @Serializable
 data class Airport(
     val schemaVersion: Int,
@@ -108,4 +114,5 @@ data class Airport(
     val aprons: List<PolygonArea> = emptyList(),
     val buildings: List<PolygonArea> = emptyList(),
     val labels: List<Label> = emptyList(),
+    val turnPads: List<TurnPad> = emptyList(),
 )

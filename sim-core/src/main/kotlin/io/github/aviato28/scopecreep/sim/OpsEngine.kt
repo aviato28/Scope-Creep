@@ -129,7 +129,7 @@ class OpsEngine internal constructor(private val s: Simulation) {
             s.emit(OpsNoticeEvent(t, OpsKind.BIRDS, false, s.rwName(br)))
         }
         val ea = emergencyAc
-        if (ea != null && (ea.done || s.aircraft.none { it === ea })) { emergencyAc = null; s.emit(OpsNoticeEvent(t, OpsKind.EMERGENCY, false, ea.callsign)) }
+        if (ea != null && (ea.done || s.aircraft.none { it === ea }) && !(ea.state == AcState.GO_AROUND && s.rejoins.any { it.emergency > 0 }) && s.rejoins.none { it.emergency > 0 }) { emergencyAc = null; s.emit(OpsNoticeEvent(t, OpsKind.EMERGENCY, false, ea.callsign)) }
         if (vehicles.isNotEmpty()) moveVehicles(dt)
         if (t >= nextChips) { nextChips = t + 1.0; refreshChips() }
     }
@@ -185,6 +185,15 @@ class OpsEngine internal constructor(private val s: Simulation) {
         s.call("$head, ${s.gnd}, ${a.spoken}, $why, request priority landing runway ${a.rwyEnd}.")
         say("${if (a.emergency == 2) "MAYDAY" else "PAN"} ${a.callsign}: LAND NEXT ON ${a.rwyEnd}. KEEP THE RUNWAY CLEAR.")
         s.emit(OpsNoticeEvent(s.time, OpsKind.EMERGENCY, true, a.callsign))
+        s.touch()
+    }
+    /** A go-around that rejoins the approach is still the emergency: same status and tag, and it asks for priority again. */
+    internal fun restoreEmergency(a: Aircraft, level: Int) {
+        a.emergency = level
+        a.tagLine = a.typeLine + (if (level == 2) " MAYDAY" else " PAN")
+        emergencyAc = a
+        s.call("${emergencyPrefix(a)}${s.gnd}, ${a.spoken}, going around, still declaring an emergency, request priority landing runway ${a.rwyEnd}.")
+        say("${if (level == 2) "MAYDAY" else "PAN"} ${a.callsign}: LAND NEXT ON ${a.rwyEnd}. KEEP THE RUNWAY CLEAR.")
         s.touch()
     }
     internal fun landed(a: Aircraft) {

@@ -35,3 +35,13 @@ and ignored if it came from another app version.
 | LVP | 150-240 s, RVR 550 m, traffic x0.7, 90 s between takeoffs, no line up with an arrival inside 4 NM |
 | Closure | 90-150 s after a 15 s warning |
 | Birds | 90-150 s, 25 % go-around, 60 % chance of a 30 s takeoff delay |
+
+## Batch 3 tunables (`SimConfig.backtrack`)
+| Area | Value |
+|---|---|
+| Mid-runway entry | an entry 300 m or more from the departure threshold (single-runway airports with turn pads only, i.e. VOML D and G1) |
+| Intersection departure | needs runway remaining: light 700 m, medium 1500 m; heavy and super must backtrack |
+| Backtrack | taxi speed along the runway edges to the turn pad, 14 s clockwise 180 degree turn, then line up; not offered with an arrival inside 120 s, in LVP, or with anything on the runway |
+| Arrival backtrack | an arrival that stops past its last exit asks to backtrack; it goes to the far-end pad, turns and returns to the chosen exit |
+| Sound / haptics | squelch 55 ms per radio line, 660/880 Hz alert on a new predicted conflict, 150-105 Hz tone and 90 ms buzz on a strike, 12 ms tick on chip taps (Settings toggles) |
+| Night mode | brightness x0.55 fills, x0.62 lines, x0.8 text (`ScopeTheme.dimmed()`) |

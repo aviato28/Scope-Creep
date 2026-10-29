@@ -55,7 +55,12 @@
       "widthM": 15
     }
   },
-  "holds": {},
+  "holds": {
+    "h-osm-9871581531": {
+      "ref": "G1",
+      "type": "runway"
+    }
+  },
   "stands": {
     "s-osm-10994526279": {
       "ref": "1",

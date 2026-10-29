@@ -15,6 +15,25 @@ data class ScopeTheme(
     val departure: Int = 0xFFFFB43A.toInt(), val selected: Int = 0xFF5FD0E8.toInt(), val routeDim: Int = 0x805FD0E8.toInt(),
     val warn: Int = 0xFFFF4D4D.toInt(), val arrival: Int = 0xFF6EE7A8.toInt(),
 ) {
+    /** Night / dim variant: dimmer fills and lines, labels and text only slightly reduced so they stay readable. Cached per theme in [Dim]. */
+    fun dimmed(): ScopeTheme {
+        fun k(c: Int, f: Float): Int {
+            val r = ((c shr 16 and 0xFF) * f).toInt(); val g = ((c shr 8 and 0xFF) * f).toInt(); val b = ((c and 0xFF) * f).toInt()
+            return (c and 0xFF000000.toInt()) or (r shl 16) or (g shl 8) or b
+        }
+        val fill = 0.55f; val line = 0.62f; val txt = 0.8f
+        return copy(
+            name = "$name Dim",
+            bg = k(bg, 0.6f), panel = k(panel, fill), panelLine = k(panelLine, line),
+            apronFill = k(apronFill, fill), apronStroke = k(apronStroke, line), buildingFill = k(buildingFill, fill), buildingStroke = k(buildingStroke, line),
+            taxiBand = k(taxiBand, fill), taxiLine = k(taxiLine, line), laneLine = k(laneLine, line),
+            runwayFill = k(runwayFill, fill), runwayEdge = k(runwayEdge, 0.7f), runwayMark = k(runwayMark, line),
+            hold = k(hold, 0.75f), stand = k(stand, line), standText = k(standText, 0.7f),
+            label = k(label, txt), labelBg = k(labelBg, 0.6f), text = k(text, txt), dim = k(dim, 0.85f), accent = k(accent, txt),
+            departure = k(departure, 0.8f), selected = k(selected, 0.8f), routeDim = k(routeDim, 0.8f), warn = k(warn, 0.85f), arrival = k(arrival, 0.8f),
+        )
+    }
+
     companion object {
         /** Values from mockup 01 (Phosphor Classic). */
         val Phosphor = ScopeTheme(
@@ -43,5 +62,8 @@ data class ScopeTheme(
             laneStrokeDp = 0.8f, taxiStrokeDp = 1.4f, wideStrokeDp = 2f,
             runwayEdgeDp = 1.2f, holdStrokeDp = 2.2f, standStrokeDp = 1f,
         )
+
+        val PhosphorDim = Phosphor.dimmed()
+        val ModernSurfaceDim = ModernSurface.dimmed()
     }
 }

@@ -55,6 +55,8 @@ class GameController(
     var frame by mutableIntStateOf(0); private set
     var timeSec = 0f; private set
     private var lastSimRev = -1
+    // sound / haptic triggers: compared once per frame
+    private var fxLog = sim.log.size; private var fxPred = 0; private var fxStrikes = sim.score.strikes
 
     /** Game speed 1/2/4; drops to 1 when something needs attention if [autoDrop] (default on). */
     var speed by mutableIntStateOf(1); private set
@@ -103,6 +105,8 @@ class GameController(
     // ---- arrival timeline (top of the scope): next ~10 min, rebuilt once per sim second ----
     /** Hideable; kept per session only. */
     var timelineOn by mutableStateOf(true)
+    /** Radio log expanded (six lines) or collapsed to the latest line. */
+    var logOpen by mutableStateOf(false)
     var tlN = 0; private set
     /** 0 = arrival marker, 1 = departure CTOT bracket, 2 = next arrival (not yet named), 3 = go-around rejoining. */
     val tlKind = IntArray(TL_MAX); val tlId = IntArray(TL_MAX); val tlLane = IntArray(TL_MAX)
@@ -133,7 +137,7 @@ class GameController(
         }
         sim.forEachRejoin { cs, eta -> tlAdd(3, -1, sim.arrivalEnd, now + eta, now + eta, 0.0, cs) }
         val next = sim.nextArrivalEtaS()
-        if (next >= 0.0) tlAdd(2, -1, sim.arrivalEnd, now + next, now + next, 0.0, "ARR")
+        if (next >= 0.0) tlAdd(2, -1, sim.arrivalEnd, now + next, now + next, 0.0, sim.nextArrivalCallsign())
     }
 
     // ---- strip bay (decision 22) ----
@@ -168,6 +172,12 @@ class GameController(
         if (paused || over) { frame++; return }
         sim.update()
         if (sim.shiftOver && !over) { over = true; reset(); selectedId = -1; applySpeed(1); bump(); frame++; return }
+        if (sim.log.size != fxLog) { fxLog = sim.log.size; io.github.aviato28.scopecreep.fx.Fx.radio() }
+        val pc = sim.predictor.count
+        if (pc > fxPred) io.github.aviato28.scopecreep.fx.Fx.conflict()
+        fxPred = pc
+        if (sim.score.strikes > fxStrikes) io.github.aviato28.scopecreep.fx.Fx.strike()
+        fxStrikes = sim.score.strikes
         if (sim.attention != lastAttention) { lastAttention = sim.attention; if (autoDrop && speed != 1) applySpeed(1) }
         var changed = false
         if (sim.revision != lastSimRev) {
@@ -202,12 +212,13 @@ class GameController(
             AcState.VACATING -> if (a.isArrival) Bay.ARRIVALS else Bay.RUNWAY
             AcState.FINAL, AcState.ROLLOUT, AcState.GO_AROUND -> Bay.ARRIVALS
             AcState.HOLDING_SHORT, AcState.LINED_UP, AcState.TAKEOFF_ROLL, AcState.HOLDING_XING, AcState.AIRBORNE, AcState.ABORTED -> Bay.RUNWAY
+            AcState.BACKTRACKING -> if (a.isArrival) Bay.ARRIVALS else Bay.RUNWAY
             AcState.TAXIING -> if (a.crossing) Bay.RUNWAY else Bay.TAXI
             AcState.VACATED -> Bay.TAXI
             AcState.AT_STAND, AcState.REQUEST_PUSH, AcState.PUSHING, AcState.REQUEST_TAXI -> Bay.APRON
         }
         /** The pilot is waiting for the controller (the REQ badge). */
-        fun needsController(a: Aircraft) = a.waitState != null || (a.state == AcState.FINAL && !a.cleared) || (a.state == AcState.ABORTED && a.stopped && a.exitAtS.isInfinite())
+        fun needsController(a: Aircraft) = a.waitState != null || (a.state == AcState.FINAL && !a.cleared) || (a.state == AcState.ABORTED && a.stopped && a.exitAtS.isInfinite()) || (a.state == AcState.ROLLOUT && a.btStopped)
 
         /** Fills [p] with the part of [poly] from arc length [s] on. No allocation beyond the Path's own growth. */
         fun fillRemaining(p: Path, poly: Polyline, s: Double) {
@@ -260,6 +271,8 @@ class GameController(
             InstructionKind.CONTINUE -> sim.submit(Continue(a.id))
             InstructionKind.LINE_UP -> sim.submit(LineUpAndWait(a.id))
             InstructionKind.TAKEOFF -> sim.submit(ClearedForTakeoff(a.id))
+            InstructionKind.BACKTRACK_LINE_UP -> sim.submit(BacktrackRunway(a.id, takeoff = false))
+            InstructionKind.BACKTRACK_TAKEOFF -> sim.submit(BacktrackRunway(a.id, takeoff = true))
         }
         bump()
     }

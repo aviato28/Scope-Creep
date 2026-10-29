@@ -114,6 +114,8 @@ data class SimConfig(
     val events: EventConfig = EventConfig(),
     /** In mixed mode (one runway for both) arrivals are at least this far apart, and never spawn while a departure is lined up or rolling. */
     val mixedArrivalIntervalS: Double = 120.0,
+    /** Backtrack and intersection departures (single-runway airports with turn pads). */
+    val backtrack: BacktrackConfig = BacktrackConfig(),
 ) {
     private fun turboprop(t: AircraftType) = t.code in setOf("AT72", "AT76", "DH8C", "DH8D", "E120")
     fun exitMinM(t: AircraftType) = if (t.wake >= Wake.H) exitMinHeavyM else if (turboprop(t)) exitMinTurbopropM else exitMinJetM
@@ -171,3 +173,19 @@ data class EventConfig(
     /** Bird activity: duration, chance an arrival goes around, chance a departure is delayed, and the delay. */
     val birdMinS: Double = 90.0, val birdMaxS: Double = 150.0, val birdGoAroundChance: Double = 0.25, val birdDelayChance: Double = 0.6, val birdDelayS: Double = 30.0
 )
+
+/** Backtrack and intersection departures (VOML): where an entry counts as mid-runway, who may depart from it, and the turn. */
+@Serializable
+data class BacktrackConfig(
+    /** A runway entry this far (m) from the departure threshold is a mid-runway entry (intersection). */
+    val midEntryMinM: Double = 300.0,
+    /** Runway length remaining (m) from the intersection that a type needs to depart from it: light, medium; heavy and super always backtrack. */
+    val intersectionMinLightM: Double = 700.0, val intersectionMinMediumM: Double = 1500.0,
+    /** The 180 degree turn on the pad takes this long (s). */
+    val turnS: Double = 14.0,
+    /** No backtrack starts with any arrival closer than this (s to touchdown), cleared or not. */
+    val arrivalClearS: Double = 120.0,
+) {
+    /** Remaining runway (m) a [t] needs to depart from an intersection; infinite = must backtrack. */
+    fun intersectionMinM(t: AircraftType) = when (t.wake) { Wake.L -> intersectionMinLightM; Wake.M -> intersectionMinMediumM; else -> Double.POSITIVE_INFINITY }
+}

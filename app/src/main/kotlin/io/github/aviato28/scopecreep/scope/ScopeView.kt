@@ -73,7 +73,7 @@ fun ScopeView(scene: ScopeScene, theme: ScopeTheme, game: GameController, modifi
                 // The visible rectangle excludes the room the bottom action bar and the corner overlays take, so the
                 // fit never changes when they appear. Insets are already applied by the parent layout.
                 val d = density
-                camera.setViewport(s.width.toFloat(), s.height.toFloat(), 12f * d, 44f * d, 12f * d, 84f * d, d)
+                camera.setViewport(s.width.toFloat(), s.height.toFloat(), 12f * d, 44f * d, 12f * d, 112f * d, d)
             }
             .pointerInput(camera, game) {
                 val slop = viewConfiguration.touchSlop

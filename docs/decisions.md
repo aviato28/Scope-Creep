@@ -46,3 +46,10 @@ Settled in Phase 0 conversation. Revisit only if you say so.
 - **Fun:** the fun is in *choosing* the route and the sequence, not in tracing lines precisely. Suggested routes keep the pace up; BUILD mode is there when you want to outsmart traffic.
 - **Realism:** it mirrors how ATC actually issues taxi instructions: a list of taxiway designators, not a drawn line.
 - **Scaling:** it works the same on every airport and every screen size, and needs only a taxiway graph we must have anyway.
+
+## Batch 3 (v0.5.0)
+| # | Topic | Decision |
+|---|-------|----------|
+| 23 | Airport select | Menu, mode, airport. Both airports show a DRAFT tag until approved. Daily seed = UTC date + ICAO; bests are per airport and mode. |
+| 24 | Phone layout | Phone = smaller screen side under 600 dp (not width alone): strip rail plus drawer, one-line collapsible radio log at the bottom-left. |
+| 25 | Backtrack | Runway edges are used only under a BACKTRACK clearance; the runway counts as occupied throughout. |

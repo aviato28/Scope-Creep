@@ -102,11 +102,22 @@ class Simulation(
     private val lineUpCache = HashMap<Int, Polyline>()
     private class Pending(val due: Double, val atc: Boolean, val text: String)
     private val pending = ArrayList<Pending>()
-    internal class Rejoin(val due: Double, val airline: Airline, val number: Int, val type: AircraftType, val other: String, val standDest: Destination?, val goArounds: Int)
+    internal class Rejoin(val due: Double, val airline: Airline, val number: Int, val type: AircraftType, val other: String, val standDest: Destination?, val goArounds: Int, val emergency: Int = 0)
     internal val rejoins = ArrayList<Rejoin>()
     private var nextId = 1
     private var spawnAt = 0.0
     private var arrSpawnAt = 0.0
+    /** The next regular arrival, decided as soon as the previous one spawns so the timeline can show its callsign (rejoining go-arounds are separate). */
+    private class Plan(val airline: Airline, val type: AircraftType, val number: Int, val other: String)
+    private var plan: Plan? = null
+    private fun makePlan(): Plan {
+        val airline = profile.pick(fleet, arrRng); val type = airline.pickType(arrRng)
+        var n = airline.numLo + arrRng.nextInt(airline.numHi - airline.numLo + 1)
+        while (aircraft.any { it.airline === airline && it.number == n } || rejoins.any { it.airline === airline && it.number == n }) n = airline.numLo + arrRng.nextInt(airline.numHi - airline.numLo + 1)
+        return Plan(airline, type, n, profile.otherEnd(airline, arrRng))
+    }
+    /** Callsign (strip form) of the next regular arrival, or "ARR" when arrivals are off. */
+    fun nextArrivalCallsign(): String = plan?.let { it.airline.icao + it.number } ?: "ARR"
     private val lineUpPos = HashMap<Int, Double>()
     private var lastNanos = -1L
     private var acc = 0.0
@@ -144,7 +155,8 @@ class Simulation(
     init {
         // starting configuration: the SimConfig runway ends (a hand-built airport may lack the arrival end)
         val ends = airport.runways.flatMap { r -> r.ends.map { it.designator } }.toSet()
-        val dep = config.departureRunway
+        // the SimConfig defaults name VOBL's runways; any other airport starts on its first runway end (the app then picks by wind)
+        val dep = config.departureRunway.takeIf { it in ends } ?: ends.first()
         val arr = if (config.arrivalRunway in ends) config.arrivalRunway else dep
         runwayConfig = runwayConfigs.firstOrNull { it.dep == dep && it.arr == arr }
             ?: RunwayConfig("custom:$dep/$arr", if (dep == arr) "$dep only: DEP + ARR" else "DEP $dep - ARR $arr", dep, arr)
@@ -177,6 +189,7 @@ class Simulation(
         }
         require(spots.isNotEmpty()) { "no spawnable stands" }
         arrSpawnAt = config.finalLeadMin   // first arrival early in the session
+        plan = makePlan()
     }
 
     // ---- clock -------------------------------------------------------------------------------
@@ -215,7 +228,7 @@ class Simulation(
                 aircraft.removeAt(i); revision++; continue
             }
             if (a.state == AcState.GO_AROUND && time - a.airborneAt >= config.goAroundSeconds) {
-                rejoins += Rejoin(time + arrRng.range(config.goAroundRejoinMin, config.goAroundRejoinMax), a.airline, a.number, a.type, a.other, a.standDest, a.goArounds)
+                rejoins += Rejoin(time + arrRng.range(config.goAroundRejoinMin, config.goAroundRejoinMax), a.airline, a.number, a.type, a.other, a.standDest, a.goArounds, a.emergency)
                 aircraft.removeAt(i); revision++; continue
             }
             i++
@@ -357,7 +370,8 @@ class Simulation(
         AcState.TAXIING -> listOf(if (a.held) InstructionKind.CONTINUE else InstructionKind.HOLD_POSITION, InstructionKind.AMEND_ROUTE)
         AcState.HOLDING_XING -> listOfNotNull(InstructionKind.CROSS_RUNWAY.takeIf { canCross(a) }, InstructionKind.AMEND_ROUTE)
         AcState.HOLDING_SHORT -> listOfNotNull(
-            InstructionKind.LINE_UP.takeIf { canLineUp(a) }, InstructionKind.TAKEOFF.takeIf { canTakeoff(a) }, InstructionKind.AMEND_ROUTE)
+            InstructionKind.LINE_UP.takeIf { canLineUp(a) }, InstructionKind.TAKEOFF.takeIf { canTakeoff(a) },
+            InstructionKind.BACKTRACK_LINE_UP.takeIf { canBacktrack(a) }, InstructionKind.BACKTRACK_TAKEOFF.takeIf { canBacktrack(a) }, InstructionKind.AMEND_ROUTE)
         AcState.LINED_UP -> if (a.armedTakeoff || !canTakeoff(a)) emptyList() else listOf(InstructionKind.TAKEOFF)
         AcState.FINAL -> if (a.cleared) listOfNotNull(InstructionKind.VACATE_VIA.takeIf { exitOptions(a).isNotEmpty() }, InstructionKind.GO_AROUND)
             else listOfNotNull(InstructionKind.CLEARED_TO_LAND.takeIf { canClearToLand(a) }, InstructionKind.GO_AROUND)
@@ -392,6 +406,7 @@ class Simulation(
         AcState.ROLLOUT -> rid(b.rwyEnd) == rwId
         AcState.VACATING -> b.onRunway && rid(b.rwyEnd) == rwId
         AcState.TAXIING -> crossRwy(b) == rwId
+        AcState.BACKTRACKING -> (if (b.isArrival) rid(b.rwyEnd) else depRwy(b)) == rwId
         else -> false
     }
     private fun runwayBusy(a: Aircraft?, rwId: String, withLinedUp: Boolean): Boolean {
@@ -412,6 +427,7 @@ class Simulation(
     fun canLineUp(a: Aircraft): Boolean {
         if (a.state != AcState.HOLDING_SHORT) return false
         val c = ctx(a.destination!!.runway); val rwId = c.rw.id
+        if (!intersectionOk(a)) return false
         for (b in aircraft) {
             if (b === a) continue
             if (b.state == AcState.LINED_UP && depRwy(b) == rwId) return false
@@ -422,11 +438,30 @@ class Simulation(
         if (ops.runwayClosed(rwId) || ops.emergencyInbound(rwId) || (ops.lvp && ops.arrivalWithin(rwId, config.events.lvpArrivalNm * 1852.0))) return false
         return !arrivalSoon(rwId, 40.0)
     }
+    /** True when [d] is a mid-runway entry for its runway end (intersection departure; only on airports with turn pads). */
+    fun isIntersection(d: Destination): Boolean = !d.stand && d.runway.isNotEmpty() && ctx(d.runway).midEntry(d, config)
+    /** An intersection departure needs the type to have enough runway left; heavies must backtrack. Entries near the threshold always pass. */
+    fun intersectionOk(a: Aircraft): Boolean {
+        val d = a.destination ?: return false
+        if (!isIntersection(d)) return true
+        return ctx(d.runway).remainingM(d) >= config.backtrack.intersectionMinM(a.type)
+    }
+    /** Backtrack clearance: from a mid-runway entry, with the whole runway free and no arrival inside [BacktrackConfig.arrivalClearS]. */
+    fun canBacktrack(a: Aircraft): Boolean {
+        if (a.state != AcState.HOLDING_SHORT || a.windRefused) return false
+        val d = a.destination ?: return false
+        if (!isIntersection(d)) return false
+        val rwId = rid(d.runway)
+        if (ops.runwayClosed(rwId) || ops.emergencyInbound(rwId) || ops.lvp) return false
+        if (runwayBusy(a, rwId, true) || arrivalSoon(rwId, config.backtrack.arrivalClearS, clearedOnly = false)) return false
+        return true
+    }
+
     /** Takeoff clearance needs the runway free of other line-ups, rolls and landings, and no landing due within a minute. */
     fun canTakeoff(a: Aircraft): Boolean {
         if (!(a.state == AcState.HOLDING_SHORT || (a.state == AcState.LINED_UP && !a.armedTakeoff))) return false
         val rwId = depRwy(a) ?: return false
-        if (a.state == AcState.HOLDING_SHORT && (ops.runwayClosed(rwId) || ops.emergencyInbound(rwId))) return false
+        if (a.state == AcState.HOLDING_SHORT && (ops.runwayClosed(rwId) || ops.emergencyInbound(rwId) || !intersectionOk(a))) return false
         if (ops.lvp) {
             val l = lastDep[rwId]
             if (l != null && time - l.airborneAt < config.events.lvpDepSpacingS) return false
@@ -442,6 +477,7 @@ class Simulation(
         AcState.LINED_UP -> if (b.armedTakeoff) 45.0 else Double.POSITIVE_INFINITY
         AcState.ROLLOUT -> if (b.stopUntil > 0.0) Double.POSITIVE_INFINITY else if (b.speed < 5.0) 70.0 else 45.0
         AcState.VACATING -> 10.0
+        AcState.BACKTRACKING -> Double.POSITIVE_INFINITY
         AcState.TAXIING -> 15.0
         else -> 0.0
     }
@@ -468,15 +504,18 @@ class Simulation(
     fun blockReason(a: Aircraft): String? = when (a.state) {
         AcState.HOLDING_SHORT, AcState.LINED_UP -> if (a.armedTakeoff) null else if (a.windRefused) "CROSSWIND, UNABLE: CHANGE RUNWAY"
             else if (a.state == AcState.LINED_UP || canLineUp(a) || canTakeoff(a)) null
+            else if (canBacktrack(a)) (if (intersectionOk(a)) null else "INTERSECTION TOO SHORT: BACKTRACK")
             else if (ops.runwayClosed(rid(a.destination!!.runway))) "RUNWAY CLOSED"
             else if (ops.emergencyInbound(rid(a.destination!!.runway))) "EMERGENCY LANDING: RUNWAY RESERVED"
             else if (ops.lvp && ops.arrivalWithin(rid(a.destination!!.runway), config.events.lvpArrivalNm * 1852.0)) "LVP: ARRIVAL INSIDE 4 NM"
-            else if (arrivalSoon(rid(a.destination!!.runway), 60.0)) "LANDING TRAFFIC: WAIT"
+            else if (isIntersection(a.destination!!) && aircraft.any { it !== a && it.state == AcState.BACKTRACKING && depRwy(it) == rid(a.destination!!.runway) }) "BACKTRACK IN PROGRESS: WAIT"
+            else if (arrivalSoon(rid(a.destination!!.runway), if (isIntersection(a.destination!!)) config.backtrack.arrivalClearS else 60.0, clearedOnly = !isIntersection(a.destination!!))) "LANDING TRAFFIC: WAIT"
             else if (aircraft.any { it !== a && it.state == AcState.LINED_UP && depRwy(it) == rid(a.destination!!.runway) }) "AIRCRAFT LINED UP: WAIT"
             else "RUNWAY BUSY: WAIT"
         AcState.FINAL -> if (a.cleared || canClearToLand(a)) null else if (ops.runwayClosed(rid(a.rwyEnd))) "RUNWAY CLOSED: GO AROUND" else "RUNWAY NOT CLEAR: WAIT OR GO AROUND"
         AcState.HOLDING_XING -> if (canCross(a)) null else if (ops.runwayClosed(a.xingRwy[a.xingDone])) "RUNWAY CLOSED" else "RUNWAY ACTIVE: WAIT"
         AcState.ABORTED -> if (a.stopped) null else "BRAKING"
+        AcState.BACKTRACKING -> null
         else -> null
     }
     fun crossingRunwayName(a: Aircraft): String = if (a.xingDone < a.xingRwy.size) rwName(a.xingRwy[a.xingDone]) else ""
@@ -494,6 +533,13 @@ class Simulation(
             if (!a.stopped) return emptyList()
             val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
             return c.exits.filter { it.sOnRunway >= cur + 20.0 }
+        }
+        if (a.state == AcState.ROLLOUT && a.btWait) {
+            // stopped past its last exit: the exits behind it, nearest first, reached by backtracking to the turn pad and back
+            if (!a.btStopped) return emptyList()
+            val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
+            return c.exits.filter { it.sOnRunway <= cur - 20.0 }.sortedByDescending { it.sOnRunway }
+                .map { RunwayExit(it.ref, it.hold, it.runwayNode, it.sOnRunway, it.nodes, it.edges, it.geom, it.angleDeg, it.ret, it.ref) }
         }
         val rolling = a.state == AcState.ROLLOUT
         if (!rolling && !(a.state == AcState.FINAL && a.cleared)) return emptyList()
@@ -740,6 +786,24 @@ class Simulation(
                 atc("${a.spoken}, runway $des, line up and wait."); pilot("Line up and wait runway $des, ${a.spoken}.")
                 beginLineUp(a)
             }
+            is BacktrackRunway -> {
+                if (!canBacktrack(a)) return false
+                val c = ctxOf(a); val des = c.designator
+                if (cmd.takeoff) {
+                    atc("${a.spoken}, backtrack runway $des, cleared for takeoff.")
+                    val xw = wind.crosswind(time, c.end.trueHeadingDeg)
+                    if (xw > a.type.xwindKt) {
+                        val kt = xw.roundToInt()
+                        pilot("Unable, crosswind $kt knots exceeds our limit, request other runway, ${a.spoken}.")
+                        a.windRefused = true; warn(a); emit(WindRefusalEvent(time, a.callsign, des, kt)); attention++
+                        revision++; return true
+                    }
+                    pilot("Backtrack runway $des, cleared for takeoff, ${a.spoken}.")
+                    wakeCheck(a, c)
+                    ops.takeoffCleared(a, c.rw.id)
+                } else { atc("${a.spoken}, backtrack runway $des, line up and wait."); pilot("Backtrack runway $des, line up and wait, ${a.spoken}.") }
+                beginBacktrack(a, cmd.takeoff)
+            }
             is ClearedForTakeoff -> {
                 if (!canTakeoff(a)) return false
                 val c = ctxOf(a); val des = c.designator
@@ -776,6 +840,11 @@ class Simulation(
                 if (a.state != AcState.ROLLOUT && a.state != AcState.ABORTED && !(a.state == AcState.FINAL && a.cleared)) return false
                 val opts = exitOptions(a)
                 val ex = (if (cmd.exitId != null) opts.firstOrNull { it.hold.id == cmd.exitId } else if (cmd.exitIdx >= 0) opts.getOrNull(cmd.exitIdx) else defaultExit(a)) ?: return false
+                if (a.state == AcState.ROLLOUT && a.btWait) {
+                    atc("${a.spoken}, backtrack runway ${a.rwyEnd}, vacate via ${ex.ref}."); pilot("Backtrack runway ${a.rwyEnd}, vacate via ${ex.ref}, ${a.spoken}.")
+                    beginArrivalBacktrack(a, ex)
+                    revision++; return true
+                }
                 atc("${a.spoken}, vacate via ${ex.say}."); pilot("Vacate via ${ex.say}, ${a.spoken}.")
                 a.exitPick = ex
                 if (a.state == AcState.ABORTED) takeExit(a, ex)
@@ -835,6 +904,73 @@ class Simulation(
     /** Segments currently blocked by a pushing or starting aircraft (for the dim red highlight). */
     fun blockedEdgeList(): List<Int> = aircraft.filter { it.state == AcState.PUSHING }.flatMap { it.blockEdges.toList() }
 
+    /** Departure: connector to the runway, then along the runway toward the departure threshold to the turn pad. */
+    private fun beginBacktrack(a: Aircraft, takeoff: Boolean) {
+        val d = a.destination!!; val c = ctxOf(a)
+        val set = graph.runwayNodes[c.rw.id]?.toSet() ?: emptySet()
+        val r = graph.search(d.node, stop = { it in set })
+        val best = set.filter { r.dist[it].isFinite() }.minByOrNull { r.dist[it] }
+        val p = best?.let { graph.pathTo(r, d.node, it) }
+        val pts = ArrayList<Double>()
+        if (p != null) for (v in graph.geometry(p.first, p.second).toList()) pts += v else { pts += d.x; pts += d.y }
+        val line = c.line; val padS = c.padS(c.padHere!!)
+        val sIn = if (best != null) line.project(graph.nx[best], graph.ny[best]) else line.project(d.x, d.y)
+        pts += line.xAt(sIn); pts += line.yAt(sIn)
+        for (i in line.size - 1 downTo 0) if (line.cum[i] < sIn - 0.5 && line.cum[i] > padS + 0.5) { pts += line.xs[i]; pts += line.ys[i] }
+        pts += line.xAt(padS); pts += line.yAt(padS)
+        a.path = Polyline.flat(pts.toDoubleArray()); a.s = 0.0; a.pathDone = false; a.speed = 0.0; a.held = false
+        a.state = AcState.BACKTRACKING; a.btPhase = 0; a.btTakeoff = takeoff; a.armedTakeoff = takeoff
+        a.instruction = "BACKTRACK ${d.runway}"
+        a.timer = config.backtrack.turnS
+    }
+
+    /** Arrival stopped past its last exit: on to the turn pad at the far end, turn, then back to [ex]. */
+    private fun beginArrivalBacktrack(a: Aircraft, ex: RunwayExit) {
+        val c = ctx(a.rwyEnd); val line = c.line
+        val padS = c.padS(c.padFar ?: error("no turn pad")); val cur = line.project(a.x, a.y)
+        val pts = ArrayList<Double>(); pts += a.x; pts += a.y
+        for (i in 0 until line.size) if (line.cum[i] > cur + 0.5 && line.cum[i] < padS - 0.5) { pts += line.xs[i]; pts += line.ys[i] }
+        pts += line.xAt(padS); pts += line.yAt(padS)
+        a.path = Polyline.flat(pts.toDoubleArray()); a.s = 0.0; a.pathDone = false; a.speed = 0.0
+        a.state = AcState.BACKTRACKING; a.btPhase = 0; a.btExit = ex; a.btWait = false; a.btStopped = false; a.onRunway = true; a.exitPick = ex
+        a.instruction = "BACKTRACK ${a.rwyEnd}"; a.timer = config.backtrack.turnS
+        a.exit = null; a.exitAtS = Double.POSITIVE_INFINITY
+    }
+
+    private fun backtrackUpdate(a: Aircraft, dt: Double) {
+        if (a.btPhase == 0) {
+            follow(a, dt, config.taxiSpeed)
+            if (a.pathDone) { a.btPhase = 1; a.speed = 0.0; a.timer = config.backtrack.turnS }
+            return
+        }
+        // the 180 degree turn on the pad (clockwise), then line up (departure) or head back to the exit (arrival)
+        val rate = 180.0 / config.backtrack.turnS
+        a.timer -= dt
+        a.heading = (a.heading + rate * dt) % 360.0
+        if (a.timer > 0.0) return
+        val ex = a.btExit
+        if (ex == null) {
+            val c = ctxOf(a); val l = c.line
+            a.faceHeading = l.headingAt(l.project(a.x, a.y)); a.heading = a.faceHeading
+            a.state = AcState.LINED_UP; a.pathDone = true; a.speed = 0.0
+            a.instruction = if (a.armedTakeoff) "CLEARED TKOF" else "LINE UP ${a.destination?.runway}"
+            pilot(if (a.armedTakeoff) "Lined up runway ${a.destination?.runway}, ${a.spoken}." else "Lined up and waiting runway ${a.destination?.runway}, ${a.spoken}.")
+        } else {
+            val c = ctx(a.rwyEnd); val line = c.line
+            val sx = ex.sOnRunway; val cur = line.project(a.x, a.y)
+            val pts = ArrayList<Double>(); pts += a.x; pts += a.y
+            for (i in line.size - 1 downTo 0) if (line.cum[i] < cur - 0.5 && line.cum[i] > sx + 0.5) { pts += line.xs[i]; pts += line.ys[i] }
+            pts += line.xAt(sx); pts += line.yAt(sx)
+            var len = 0.0
+            for (k in 2 until pts.size step 2) len += hypot(pts[k] - pts[k - 2], pts[k + 1] - pts[k - 1])
+            for (v in ex.geom) pts += v
+            a.path = Polyline.flat(pts.toDoubleArray()); a.s = 0.0; a.pathDone = false; a.speed = 0.0
+            a.exitAtS = len; a.exit = ex; a.exitLabel = ex.label; a.instruction = "VACATE ${ex.label}"
+            a.state = AcState.VACATING; a.btExit = null; a.faceHeading = Double.NaN
+        }
+        revision++
+    }
+
     private fun beginLineUp(a: Aircraft) {
         val d = a.destination!!; val c = ctxOf(a)
         a.path = lineUpCache.getOrPut(d.node) {
@@ -888,26 +1024,27 @@ class Simulation(
     private fun spawnArrival(re: Rejoin?) {
         val c = ctx(arrivalEnd)
         // mixed mode: do not feed the runway a new arrival while a departure is lined up or rolling on it
-        if (runwayConfig.mixed && aircraft.any { (it.state == AcState.LINED_UP || it.state == AcState.TAKEOFF_ROLL) && it.destination?.runway == c.designator }) {
-            if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds)
+        if (runwayConfig.mixed && aircraft.any { (it.state == AcState.LINED_UP || it.state == AcState.TAKEOFF_ROLL || it.state == AcState.BACKTRACKING) && it.destination?.runway == c.designator }) {
+            if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds, re.emergency)
             return
         }
         // a closed or blocked runway gets no new traffic: the arrival waits outside
         if (ops.runwayBlocked(c.rw.id)) {
-            if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds)
+            if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds, re.emergency)
             return
         }
         var lead = arrRng.range(config.finalLeadMin, config.finalLeadMax)
         // keep one-minute spacing on final
         for (b in aircraft) if (b.state == AcState.FINAL && b.rwyEnd == c.designator) lead = max(lead, etaToTouchdown(b) + 60.0)
         val startS = c.thrS + config.touchdownZoneM - lead * config.approachSpeed
-        if (startS < 0.0) { if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds); return }
+        if (startS < 0.0) { if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds, re.emergency); return }
         val airline: Airline; val type: AircraftType; val num: Int; val other: String; var stand: Destination?
         if (re == null) {
-            airline = profile.pick(fleet, arrRng); type = airline.pickType(arrRng)
-            var n = airline.numLo + arrRng.nextInt(airline.numHi - airline.numLo + 1)
+            val pl = plan!!
+            airline = pl.airline; type = pl.type
+            var n = pl.number
             while (aircraft.any { it.airline === airline && it.number == n }) n = airline.numLo + arrRng.nextInt(airline.numHi - airline.numLo + 1)
-            num = n; other = profile.otherEnd(airline, arrRng); stand = null
+            num = n; other = pl.other; stand = null
         } else { airline = re.airline; type = re.type; num = re.number; other = re.other; stand = re.standDest }
         if (stand == null || !standFree(stand, null)) {
             val free = standDests.filter { standFree(it, null) }
@@ -922,7 +1059,8 @@ class Simulation(
         a.prevX = a.x; a.prevY = a.y; a.prevHeading = a.heading
         a.state = AcState.FINAL; a.instruction = "REQ LANDING"; a.lastRecall = time + 20.0
         aircraft += a; revision++
-        if (re == null) ops.arrivalSpawned(a)
+        if (re == null) plan = makePlan()
+        if (re == null) ops.arrivalSpawned(a) else if (re.emergency > 0) ops.restoreEmergency(a, re.emergency)
         val tw = tailwindKt(c.designator)
         call("$gnd, ${a.spoken}, established ILS runway ${c.designator}" + (if (tw > config.tailwindLimitKt) ", reports tailwind ${tw.roundToInt()} knots" else "") + ", request landing.")
         if (re == null) arrSpawnAt = time + arrInterval() * arrRng.range(1 - config.spawnJitter, 1 + config.spawnJitter)
@@ -1041,6 +1179,7 @@ class Simulation(
                 a.speed = min(a.speed + 3.0 * dt, 95.0); moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
             }
             AcState.ABORTED -> ops.abortedUpdate(a, dt)
+            AcState.BACKTRACKING -> backtrackUpdate(a, dt)
             AcState.FINAL -> finalUpdate(a, dt)
             AcState.GO_AROUND -> {
                 a.speed = min(a.speed + 3.0 * dt, 95.0); moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
@@ -1094,6 +1233,17 @@ class Simulation(
             val pick = a.exitPick?.takeIf { p -> exitOptions(a).any { it.hold.id == p.hold.id } }
             val ex = pick ?: defaultExit(a)
             if (ex != null) { takeExit(a, ex); if (pick == null) pilot("Vacating via ${ex.label}, ${a.spoken}.") }
+            else if (ctx(a.rwyEnd).padFar != null && ctx(a.rwyEnd).backtrackOk) a.btWait = true
+        }
+        if (a.btWait) {
+            // no exit left ahead: brake to a stop and ask to backtrack
+            a.speed = max(0.0, a.speed - config.rolloutMaxDecel * dt)
+            moveBy(a, a.speed * dt); a.heading = a.path.headingAt(a.s)
+            if (a.speed <= 0.0 && !a.btStopped) {
+                a.btStopped = true; a.instruction = "REQ BACKTRACK"
+                call("${a.spoken}, runway ${a.rwyEnd}, no exit ahead, request backtrack."); revision++
+            }
+            return
         }
         if (a.exitAtS.isFinite()) {
             val room = max(0.0, a.exitAtS - a.s)
@@ -1189,8 +1339,8 @@ class Simulation(
     // ---- separation: following, head-on, junctions, queues ------------------------------------
 
     private fun blocks(s: AcState) = s == AcState.PUSHING || s == AcState.REQUEST_TAXI || s == AcState.TAXIING || s == AcState.HOLDING_SHORT ||
-        s == AcState.VACATED || s == AcState.VACATING || s == AcState.HOLDING_XING
-    private fun scans(s: AcState) = s == AcState.TAXIING || s == AcState.VACATING
+        s == AcState.VACATED || s == AcState.VACATING || s == AcState.HOLDING_XING || s == AcState.BACKTRACKING
+    private fun scans(s: AcState) = s == AcState.TAXIING || s == AcState.VACATING || s == AcState.BACKTRACKING
 
     private fun scanTraffic() {
         for (a in aircraft) { a.prevConflict = a.conflictWith; a.conflictWith = 0; a.gapAllow = Double.POSITIVE_INFINITY }
@@ -1322,6 +1472,7 @@ class Simulation(
     private fun isRolling(a: Aircraft) = a.state == AcState.TAKEOFF_ROLL || a.state == AcState.ROLLOUT
     private fun runwayOf(a: Aircraft): String? = when {
         a.state == AcState.TAKEOFF_ROLL || a.state == AcState.LINED_UP -> depRwy(a)
+        a.state == AcState.BACKTRACKING -> if (a.isArrival) rid(a.rwyEnd) else depRwy(a)
         a.state == AcState.ROLLOUT || (a.state == AcState.VACATING && a.onRunway) -> rid(a.rwyEnd)
         a.crossing -> crossRwy(a)
         else -> null

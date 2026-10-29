@@ -35,6 +35,9 @@ import io.github.aviato28.scopecreep.ui.StripDrawer
 import io.github.aviato28.scopecreep.ui.Summary
 import io.github.aviato28.scopecreep.sim.OpsKind
 import io.github.aviato28.scopecreep.ui.ArrivalTimeline
+import io.github.aviato28.scopecreep.ui.GameLayout
+import io.github.aviato28.scopecreep.ui.AirportSelect
+import io.github.aviato28.scopecreep.sim.*
 import io.github.aviato28.scopecreep.ui.OpsBanner
 import io.github.aviato28.scopecreep.ui.TIMELINE_SHOWN_DP
 import io.github.aviato28.scopecreep.ui.PauseOverlay
@@ -68,14 +71,13 @@ class ScreenshotTest {
     }
 
     private val context get() = ApplicationProvider.getApplicationContext<Application>()
-    private val scene: ScopeScene by lazy {
-        val f = File("../airports/VOBL/airport.json")
-        ScopeScene(f.inputStream().use { AirportLoader.load(it) })
-    }
+    private fun load(icao: String) = ScopeScene(File("../airports/$icao/airport.json").inputStream().use { AirportLoader.load(it) })
+    private val scene: ScopeScene by lazy { load("VOBL") }
+    private val voml: ScopeScene by lazy { load("VOML") }
 
     /** A fresh seeded game, advanced [seconds] of sim time at 30 frames per second (deterministic). */
-    private fun game(mode: GameMode = GameMode.SHIFT, seconds: Int = 0): GameController {
-        val g = GameController(scene, 20261029L, gameMode = mode, tutorial = false)
+    private fun game(mode: GameMode = GameMode.SHIFT, seconds: Int = 0, sc: ScopeScene = scene, profile: TrafficProfile = TrafficProfile.generic): GameController {
+        val g = GameController(sc, 20261029L, profile = profile, gameMode = mode, tutorial = false)
         g.autoDrop = false
         var t = 1_000_000_000L
         g.frame(t)
@@ -89,22 +91,29 @@ class ScreenshotTest {
             Box(Modifier.fillMaxSize().background(Color(theme.bg))) { content(theme) }
         }
         rule.waitForIdle()
-        rule.onRoot().captureRoboImage("src/test/screenshots/${name}_${dev.tag}_${theme.name.substringBefore(' ').lowercase()}.png")
+        rule.onRoot().captureRoboImage("src/test/screenshots/${name}_${dev.tag}_${theme.name.substringBefore(' ').lowercase()}${if (theme.name.endsWith(" Dim")) "_dim" else ""}.png")
     }
 
-    @Composable private fun GameScreen(g: GameController, t: ScopeTheme) {
-        val wide = LocalConfiguration.current.screenWidthDp >= 840
-        Row(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxHeight()) {
-                ScopeView(g.scene, t, g)
-                ArrivalTimeline(g, t, Modifier.align(Alignment.TopStart))
-                RadioLog(g, t, Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = (TIMELINE_SHOWN_DP + 6).dp))
-                OpsBanner(g, t, Modifier.align(Alignment.TopCenter).padding(top = (TIMELINE_SHOWN_DP + 6).dp))
-                ActionBar(g, t, Modifier.align(Alignment.BottomCenter))
-                if (!wide) StripDrawer(g, t, Modifier.align(Alignment.TopEnd).padding(top = (TIMELINE_SHOWN_DP + 6).dp, end = 6.dp))
+    @Composable private fun GameScreen(g: GameController, t: ScopeTheme) = GameLayout(g, t, night = t.name.endsWith(" Dim"), fixedClock = "12:00:00Z")
+
+    /** VOML: drive the first departure to an intersection hold (D1 / G1) and select it, so the action bar shows the line-up and backtrack choices. */
+    private fun vomlAtHold(): GameController {
+        val profile = File("../airports/VOML/traffic.json").readText().let { TrafficProfile.parse(it) }
+        val g = game(sc = voml, profile = profile)
+        var t = 1_000_000_000L
+        val sim = g.sim
+        var guard = 0
+        while (guard++ < 30 * 400) {
+            t += 33_333_333L; g.frame(t)
+            val a = sim.aircraft.firstOrNull { !it.isArrival } ?: continue
+            when (a.state) {
+                AcState.REQUEST_PUSH -> sim.submit(PushbackApproved(a.id))
+                AcState.REQUEST_TAXI -> { val d = sim.destinations.first { sim.isIntersection(it) }; sim.submit(Taxi(a.id, sim.suggestRoutes(a, d).first())) }
+                AcState.HOLDING_SHORT -> { g.select(a.id); repeat(60) { t += 33_333_333L; g.frame(t) }; return g }
+                else -> {}
             }
-            StripPanel(g, t, wide)
         }
+        return g
     }
 
     private fun menu(dev: Dev) = shot("menu", dev) { t -> MainMenu(t, Prefs(context), onPlay = {}, onSettings = {}, onAbout = {}) }
@@ -117,11 +126,22 @@ class ScreenshotTest {
         repeat(25 * 30) { t += 33_333_333L; g.frame(t) }
         shot("scope_lvp", dev) { th -> GameScreen(g, th) }
     }
+    private fun scopeVoml(dev: Dev) { val g = vomlAtHold(); shot("scope_voml", dev) { t -> GameScreen(g, t) } }
+    private fun scopeVomlPlain(dev: Dev) { val g = game(seconds = 60, sc = voml); shot("scope_voml_idle", dev) { t -> GameScreen(g, t) } }
+    private fun scopeDim(dev: Dev) { val g = game(seconds = 90); shot("scope", dev, ScopeTheme.PhosphorDim) { t -> GameScreen(g, t) } }
+    private fun airportSelect(dev: Dev) = shot("airports", dev) { t -> AirportSelect(t, Prefs(context), GameMode.DAILY, mapOf("VOBL" to scene, "VOML" to voml), onPick = {}, onBack = {}) }
+    private fun logOpen(dev: Dev) { val g = game(seconds = 90); g.logOpen = true; shot("scope_log", dev) { t -> GameScreen(g, t) } }
     private fun pause(dev: Dev) { shot("pause", dev) { th -> PauseOverlay(th, onResume = {}, onQuit = {}, onReport = {}) } }
     private fun about(dev: Dev) = shot("about", dev) { t -> AboutScreen(t, UpdateManager.get(context)) {} }
     private fun settings(dev: Dev) = shot("settings", dev) { t -> SettingsScreen(t, Prefs(context), UpdateManager.get(context)) {} }
     private fun summary(dev: Dev) { val g = game(seconds = 90); shot("summary", dev) { t -> Summary(t, g, false, 120, onAgain = {}, onMenu = {}) } }
 
+    @Test fun scopeVomlPhone() = scopeVoml(Dev.PHONE)
+    @Test fun scopeVomlTablet() = scopeVoml(Dev.TABLET)
+    @Test fun scopeVomlIdlePhone() = scopeVomlPlain(Dev.PHONE)
+    @Test fun scopeDimPhone() = scopeDim(Dev.PHONE)
+    @Test fun airportsPhone() = airportSelect(Dev.PHONE)
+    @Test fun logOpenPhone() = logOpen(Dev.PHONE)
     @Test fun menuPhone() = menu(Dev.PHONE)
     @Test fun menuTablet() = menu(Dev.TABLET)
     @Test fun briefingPhone() = briefing(Dev.PHONE)

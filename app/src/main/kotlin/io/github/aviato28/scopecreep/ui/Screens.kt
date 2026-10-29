@@ -56,8 +56,8 @@ fun MainMenu(t: ScopeTheme, prefs: Prefs, onPlay: (GameMode) -> Unit, onSettings
         if (resumeLabel != null) PButton(t, "RESUME SHIFT", Modifier.widthIn(min = 280.dp), primary = true, sub = resumeLabel) { onResume() }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (m in GameMode.values()) {
-                val b = prefs.bestFor(m)
-                PButton(t, m.label, Modifier.widthIn(min = 130.dp), primary = m == GameMode.SHIFT, sub = if (b > 0) "BEST $b" else "NO SCORE YET") { onPlay(m) }
+                PButton(t, m.label, Modifier.widthIn(min = 130.dp), primary = m == GameMode.SHIFT,
+                    sub = when (m) { GameMode.SHIFT -> "7 MIN"; GameMode.ENDLESS -> "NO CLOCK"; GameMode.DAILY -> "TODAY'S SEED" }) { onPlay(m) }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -65,6 +65,37 @@ fun MainMenu(t: ScopeTheme, prefs: Prefs, onPlay: (GameMode) -> Unit, onSettings
             PButton(t, "ABOUT", Modifier.widthIn(min = 130.dp)) { onAbout() }
         }
         BasicText("v${BuildConfig.VERSION_NAME}", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+    }
+}
+
+private val AIRPORT_NAMES = mapOf("VOBL" to "BENGALURU KEMPEGOWDA", "VOML" to "MANGALURU")
+private val AIRPORT_BLURB = mapOf("VOBL" to "TWO PARALLEL RUNWAYS", "VOML" to "ONE RUNWAY: INTERSECTION AND BACKTRACK DEPARTURES")
+
+/** Menu, mode, airport: one card per airport with the DRAFT tag (until the maintainer approves the layout) and your best for this mode. */
+@Composable
+fun AirportSelect(t: ScopeTheme, prefs: Prefs, mode: GameMode, scenes: Map<String, io.github.aviato28.scopecreep.scope.ScopeScene>?, onPick: (String) -> Unit, onBack: () -> Unit) {
+    val st = TextStyle(Color(t.text), 13.sp, fontFamily = Mono)
+    Page(t) {
+        BasicText("${mode.label} - CHOOSE AIRPORT", style = st.copy(Color(t.label), 16.sp, fontWeight = FontWeight.Bold))
+        if (mode == GameMode.DAILY) BasicText("Daily seed: UTC date + airport code", style = st.copy(Color(t.dim), 11.sp))
+        for (icao in io.github.aviato28.scopecreep.game.Modes.AIRPORTS) {
+            val sc = scenes?.get(icao)
+            val draft = sc == null || sc.airport.meta.status != "approved"
+            val b = prefs.bestFor(mode, icao)
+            Row(Modifier.widthIn(max = 520.dp).fillMaxWidth().heightIn(min = 64.dp).border(1.dp, Color(t.panelLine)).background(Color(t.panel)).clickable(enabled = sc != null) { onPick(icao) }.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        BasicText(icao, style = st.copy(Color(t.accent), 18.sp, fontWeight = FontWeight.Bold))
+                        if (draft) BasicText("DRAFT", Modifier.border(1.dp, Color(t.hold)).padding(horizontal = 5.dp, vertical = 1.dp), style = st.copy(Color(t.hold), 10.sp, fontWeight = FontWeight.Bold))
+                    }
+                    BasicText(AIRPORT_NAMES[icao] ?: icao, style = st)
+                    BasicText(AIRPORT_BLURB[icao] ?: "", style = st.copy(Color(t.dim), 10.sp))
+                }
+                BasicText(if (sc == null) "LOADING" else if (b > 0) "BEST $b" else "NO SCORE YET", style = st.copy(Color(t.dim), 11.sp))
+            }
+        }
+        PButton(t, "BACK") { onBack() }
     }
 }
 
@@ -124,7 +155,7 @@ fun Summary(t: ScopeTheme, g: GameController, newBest: Boolean, best: Int, onAga
             row("Strikes ${s.strikes} of ${g.sim.config.maxStrikes}", "-${s.strikeTotal}", if (s.strikes > 0) t.warn else t.text)()
             row("Warnings", "${s.warnings}")()
             row("Go-arounds", "${g.sim.goArounds}")()
-            if (g.gameMode == GameMode.DAILY) row("Seed", "UTC date + VOBL")()
+            if (g.gameMode == GameMode.DAILY) row("Seed", "UTC date + ${g.scene.airport.meta.icao}")()
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             PButton(t, "MENU") { onMenu() }
@@ -159,6 +190,9 @@ fun SettingsScreen(t: ScopeTheme, prefs: Prefs, updater: UpdateManager, onClose:
                 var beta by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(updater.betaChannel) }
                 toggle("BETA UPDATE CHANNEL", "Offer pre-releases when checking for updates", beta) { beta = it; updater.betaChannel = it }
             }
+            toggle("SOUND", "Radio squelch, conflict alert and strike tone (follows the system volume)", prefs.sound) { prefs.updateSound(it) }
+            toggle("HAPTICS", "Light tick on chip taps, a buzz on a strike", prefs.haptics) { prefs.updateHaptics(it) }
+            toggle("NIGHT MODE", "Dimmer scope and panels (also the moon icon in the top bar)", prefs.night) { prefs.updateNight(it) }
             toggle("TUTORIAL HINTS", "Replay the first-shift hints on your next Shift", !prefs.onboardingDone) { prefs.updateOnboardingDone(!it) }
             PButton(t, "CLOSE", Modifier.align(Alignment.CenterHorizontally), primary = true) { onClose() }
         }
@@ -181,7 +215,7 @@ fun hintFor(g: GameController): String? {
         else -> when (a.state) {
             AcState.REQUEST_PUSH -> "Choose PUSHBACK APPROVED"
             AcState.REQUEST_TAXI -> "Choose TAXI, then a hold point"
-            AcState.HOLDING_SHORT -> "LINE UP AND WAIT, then CLEARED FOR TAKEOFF"
+            AcState.HOLDING_SHORT -> if (g.sim.isIntersection(a.destination ?: return "LINE UP AND WAIT, then CLEARED FOR TAKEOFF")) "Intersection: LINE UP here, or BACKTRACK for the full runway (heavies must)" else "LINE UP AND WAIT, then CLEARED FOR TAKEOFF"
             AcState.LINED_UP -> "Choose CLEARED FOR TAKEOFF when it is allowed"
             AcState.FINAL -> "CLEARED TO LAND once the runway is clear"
             AcState.VACATED -> "Choose TAXI and a stand"

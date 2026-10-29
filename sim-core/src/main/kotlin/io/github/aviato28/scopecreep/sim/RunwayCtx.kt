@@ -3,6 +3,7 @@ package io.github.aviato28.scopecreep.sim
 import io.github.aviato28.scopecreep.sim.airport.Airport
 import io.github.aviato28.scopecreep.sim.airport.Runway
 import io.github.aviato28.scopecreep.sim.airport.RunwayEnd
+import io.github.aviato28.scopecreep.sim.airport.TurnPad
 import io.github.aviato28.scopecreep.sim.routing.Destination
 import io.github.aviato28.scopecreep.sim.routing.TaxiGraph
 import kotlin.math.hypot
@@ -66,6 +67,20 @@ class RwyCtx(val airport: Airport, val graph: TaxiGraph, val config: SimConfig, 
             .map { g -> g.minBy { hypot(it.x - end.threshold.x, it.y - end.threshold.y) } }
             .sortedBy { hypot(it.x - end.threshold.x, it.y - end.threshold.y) }
     }
+
+    /** Turn pad at this end (departures backtrack to it) and at the far end (arrivals rolling out turn there), when the data has them. */
+    val padHere: TurnPad? = airport.turnPads.firstOrNull { it.runway == rw.id && it.end == end.designator }
+    val padFar: TurnPad? = airport.turnPads.firstOrNull { it.runway == rw.id && it.end == far.designator }
+    /** Every runway centreline edge is marked as allowed to taxi along. */
+    private val edgesOk: Boolean = airport.graph.edges.filter { it.kind == "runway" && it.ref?.split('/')?.toSet() == rw.ends.map { e -> e.designator }.toSet() }
+        .let { l -> l.isNotEmpty() && l.all { it.backtrackAllowed } }
+    val backtrackOk get() = edgesOk && padHere != null && padFar != null
+    /** Distance along [line] of the turn pad's node. */
+    fun padS(p: TurnPad): Double { val n = graph.idToNode[p.node] ?: return 0.0; return line.project(graph.nx[n], graph.ny[n]) }
+    /** True for a runway entry far enough from this end to be an intersection departure (only where backtracking is possible). */
+    fun midEntry(d: Destination, cfg: SimConfig) = backtrackOk && line.project(d.x, d.y) >= cfg.backtrack.midEntryMinM
+    /** Runway remaining beyond the entry [d]. */
+    fun remainingM(d: Destination) = line.length - line.project(d.x, d.y)
 
     /** Exits ordered along the runway from this end (any hold with a ref and a short connector, on either half). */
     val exits: List<RunwayExit> by lazy {

@@ -193,6 +193,7 @@ def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, 
         h = hbyid[hid]
         if d.get("delete"): h["_del"] = True; n += 1; continue
         if "ref" in d: h["ref"], h["refGenerated"], h["refSource"], h["_ov"] = ref_of(d), False, "override", True; n += 1
+        if d.get("type") in ("runway", "intermediate"): h["type"] = d["type"]; n += 1
     holds[:] = [h for h in holds if not h.get("_del")]
     # hold refs follow a renamed connector, unless explicitly overridden
     for h in holds:

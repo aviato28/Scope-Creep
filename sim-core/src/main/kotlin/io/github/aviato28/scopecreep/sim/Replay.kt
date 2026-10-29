@@ -32,7 +32,7 @@ class LoggedCommand(
     val face: Int = -1, val exitId: String? = null, val exitIdx: Int = -1,
     val from: Int = -1, val edges: IntArray? = null, val dest: LoggedDest? = null,
     val cfgDep: String? = null, val cfgArr: String? = null, val silent: Boolean = false,
-    val event: String? = null,
+    val event: String? = null, val flag: Boolean = false,
 ) {
     companion object {
         fun of(c: Command, tick: Long, g: TaxiGraph): LoggedCommand = when (c) {
@@ -49,6 +49,7 @@ class LoggedCommand(
             is GoAround -> LoggedCommand(tick, "GoAround", c.aircraftId)
             is VacateVia -> LoggedCommand(tick, "VacateVia", c.aircraftId, exitId = c.exitId, exitIdx = c.exitIdx)
             is CrossRunway -> LoggedCommand(tick, "CrossRunway", c.aircraftId)
+            is BacktrackRunway -> LoggedCommand(tick, "BacktrackRunway", c.aircraftId, flag = c.takeoff)
         }
         private fun route(tick: Long, type: String, id: Int, r: Route) =
             LoggedCommand(tick, type, id, from = r.nodes.first(), edges = r.edges.copyOf(), dest = LoggedDest.of(r.destination))
@@ -162,6 +163,7 @@ object Replay {
         "GoAround" -> GoAround(c.id)
         "VacateVia" -> VacateVia(c.id, c.exitIdx, c.exitId)
         "CrossRunway" -> CrossRunway(c.id)
+        "BacktrackRunway" -> BacktrackRunway(c.id, c.flag)
         else -> error("unknown logged command ${c.type}")
     }
 

@@ -27,6 +27,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import io.github.aviato28.scopecreep.fx.Fx
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,20 +97,25 @@ object ScopeHooks { var onStop: (() -> Unit)? = null }
 
 private val Mono = FontFamily.Monospace
 
-private enum class Screen { MENU, BRIEFING, PLAY, SETTINGS, ABOUT }
+private enum class Screen { MENU, AIRPORT, BRIEFING, PLAY, SETTINGS, ABOUT }
 
 @Composable
 private fun ScopeApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { Prefs(context) }
     val theme = prefs.theme
-    val scene by produceState<ScopeScene?>(null) {
-        // Draft airports are allowed in every build for now (only VOBL exists).
+    // Draft airports are allowed in every build for now (neither shipped airport is approved yet); both are loaded once.
+    val scenes by produceState<Map<String, ScopeScene>?>(null) {
         value = withContext(Dispatchers.Default) {
-            ScopeScene(context.assets.open("airports/VOBL/airport.json").use { AirportLoader.load(it) })
+            Modes.AIRPORTS.mapNotNull { icao -> runCatching { icao to ScopeScene(context.assets.open("airports/$icao/airport.json").use { AirportLoader.load(it) }) }.getOrNull() }.toMap()
         }
     }
+    val coroutines = rememberCoroutineScope()
     var screen by rememberSaveable { mutableStateOf(Screen.MENU) }
+    var pendingMode by rememberSaveable { mutableStateOf(GameMode.SHIFT) }
+    var restoring by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { Fx.init(context) }
+    Fx.sound = prefs.sound; Fx.haptics = prefs.haptics
     var game by remember { mutableStateOf<GameController?>(null) }
     var newBest by remember { mutableStateOf(false) }
     val updater = remember { io.github.aviato28.scopecreep.update.UpdateManager.get(context) }
@@ -124,23 +132,31 @@ private fun ScopeApp() {
         return fleet to profile
     }
 
+    /** Rebuilds a saved shift by replaying it on a background thread ("Restoring shift..." shows meanwhile). */
     fun resumeGame(d: ReplayData) {
-        val sc = scene ?: return
-        val (fleet, profile) = loadAssets(sc)
-        val m = runCatching { GameMode.valueOf(d.header.mode) }.getOrDefault(GameMode.SHIFT)
-        val ctl = runCatching { GameController(sc, d.header.seed, fleet, profile, gameMode = m, tutorial = d.header.tutorial, resume = d) }.getOrNull()
-        if (ctl == null) { ReplayStore.clear(context); saved = null; return }
-        game = ctl.also { it.autoDrop = prefs.autoDrop; it.bestForMode = prefs.bestFor(m); it.pause(true) }
-        promptOpen = false; newBest = false; screen = Screen.PLAY
+        val sc = scenes?.get(d.header.airport) ?: scenes?.get(Modes.AIRPORT) ?: return
+        if (restoring) return
+        restoring = true; promptOpen = false
+        coroutines.launch {
+            val (fleet, profile) = withContext(Dispatchers.IO) { loadAssets(sc) }
+            val m = runCatching { GameMode.valueOf(d.header.mode) }.getOrDefault(GameMode.SHIFT)
+            val ctl = withContext(Dispatchers.Default) {
+                runCatching { GameController(sc, d.header.seed, fleet, profile, gameMode = m, tutorial = d.header.tutorial, resume = d) }.getOrNull()
+            }
+            restoring = false
+            if (ctl == null) { ReplayStore.clear(context); saved = null; return@launch }
+            game = ctl.also { it.autoDrop = prefs.autoDrop; it.bestForMode = prefs.bestFor(m, sc.airport.meta.icao); it.pause(true) }
+            newBest = false; screen = Screen.PLAY
+        }
     }
 
-    fun newGame(m: GameMode) {
-        val sc = scene ?: return
+    fun newGame(m: GameMode, icao: String) {
+        val sc = scenes?.get(icao) ?: return
         // airline telephony table (data/airlines.json) and this airport's traffic mix; fall back to the bundled defaults
         val (fleet, profile) = loadAssets(sc)
         val tutorial = m == GameMode.SHIFT && !prefs.onboardingDone
-        game = GameController(sc, Modes.seed(m), fleet, profile, gameMode = m, tutorial = tutorial).also {
-            it.autoDrop = prefs.autoDrop; it.bestForMode = prefs.bestFor(m); it.pause(true)
+        game = GameController(sc, Modes.seed(m, icao), fleet, profile, gameMode = m, tutorial = tutorial).also {
+            it.autoDrop = prefs.autoDrop; it.bestForMode = prefs.bestFor(m, icao); it.pause(true)
         }
         newBest = false; screen = Screen.BRIEFING
     }
@@ -158,7 +174,7 @@ private fun ScopeApp() {
     LaunchedEffect(g?.over) {
         if (g != null && g.over) {
             ReplayStore.clear(context); saved = null
-            newBest = prefs.submitBest(g.gameMode, g.sim.score.score)
+            newBest = prefs.submitBest(g.gameMode, g.sim.score.score, g.scene.airport.meta.icao)
             if (g.tutorial) prefs.updateOnboardingDone(true)
         }
     }
@@ -172,122 +188,29 @@ private fun ScopeApp() {
     val bg = Color(theme.bg)
     Box(Modifier.fillMaxSize().background(bg).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
         if (g != null && (screen == Screen.PLAY || screen == Screen.BRIEFING)) {
-            val sc = g.scene
-            Column(Modifier.fillMaxSize()) {
-                StatusBar(sc, g, theme, updateState is io.github.aviato28.scopecreep.update.UpdateState.Available) { g.pause(true) }
-                val wide = LocalConfiguration.current.screenWidthDp >= 840
-                Row(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        val tlH = (if (g.timelineOn) TIMELINE_SHOWN_DP else TIMELINE_HIDDEN_DP).dpUnit
-                        ScopeView(sc, theme, g)
-                        ArrivalTimeline(g, theme, Modifier.align(Alignment.TopStart))
-                        RadioLog(g, theme, Modifier.align(Alignment.TopStart).padding(start = 6.dpUnit, top = tlH + 6.dpUnit))
-                        Column(Modifier.align(Alignment.TopCenter).padding(top = tlH + 6.dpUnit), horizontalAlignment = Alignment.CenterHorizontally) {
-                            OpsBanner(g, theme)
-                            PreviewBanner(g, theme)
-                        }
-                        HintBanner(g, theme, Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp))
-                        ActionBar(g, theme, Modifier.align(Alignment.BottomCenter))
-                        RunwaySheet(g, theme, Modifier.align(Alignment.TopEnd).padding(top = tlH + 6.dpUnit, end = 6.dpUnit))
-                        if (!wide) StripDrawer(g, theme, Modifier.align(Alignment.TopEnd).padding(top = tlH + 6.dpUnit, end = 6.dpUnit))
-                        if (sc.airport.meta.status != "approved") {
-                            BasicText(
-                                "DRAFT LAYOUT",
-                                Modifier.align(Alignment.BottomEnd).padding(10.dp).border(1.dp, Color(theme.hold)).padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = TextStyle(Color(theme.hold), 10.sp, fontFamily = Mono, fontWeight = FontWeight.Bold),
-                            )
-                        }
-                    }
-                    StripPanel(g, theme, wide)
-                }
-            }
+            GameLayout(g, theme, night = prefs.night, updateAvailable = updateState is io.github.aviato28.scopecreep.update.UpdateState.Available,
+                onNight = { prefs.updateNight(!prefs.night) }, onPause = { g.pause(true) })
             if (screen == Screen.BRIEFING) Briefing(theme, g, g.tutorial, onStart = { g.pause(false); screen = Screen.PLAY }, onBack = { screen = Screen.MENU })
-            else if (g.over) Summary(theme, g, newBest, prefs.bestFor(g.gameMode), onAgain = { newGame(g.gameMode) }, onMenu = { screen = Screen.MENU })
+            else if (g.over) Summary(theme, g, newBest, prefs.bestFor(g.gameMode, g.scene.airport.meta.icao), onAgain = { newGame(g.gameMode, g.scene.airport.meta.icao) }, onMenu = { screen = Screen.MENU })
             else if (g.paused) PauseOverlay(theme, onResume = { g.pause(false) }, onQuit = { screen = Screen.MENU }, onReport = { ReplayStore.share(context, g.replay()) })
         }
         when (screen) {
             Screen.MENU -> {
                 val sv = saved
-                MainMenu(theme, prefs, onPlay = { newGame(it) }, onSettings = { screen = Screen.SETTINGS }, onAbout = { screen = Screen.ABOUT },
+                MainMenu(theme, prefs, onPlay = { pendingMode = it; screen = Screen.AIRPORT }, onSettings = { screen = Screen.SETTINGS }, onAbout = { screen = Screen.ABOUT },
                     resumeLabel = sv?.let { "${it.header.mode}  ${"%d:%02d".format(it.header.endTime.toInt() / 60, it.header.endTime.toInt() % 60)} IN" }, onResume = { sv?.let { d -> resumeGame(d) } })
-                if (sv != null && promptOpen && scene != null) ResumePrompt(theme, onResume = { resumeGame(sv) }, onDiscard = { ReplayStore.clear(context); saved = null; promptOpen = false })
+                if (sv != null && promptOpen && scenes != null) ResumePrompt(theme, onResume = { resumeGame(sv) }, onDiscard = { ReplayStore.clear(context); saved = null; promptOpen = false })
             }
+            Screen.AIRPORT -> AirportSelect(theme, prefs, pendingMode, scenes, onPick = { newGame(pendingMode, it) }, onBack = { screen = Screen.MENU })
             Screen.SETTINGS -> SettingsScreen(theme, prefs, updater) { screen = Screen.MENU }
             Screen.ABOUT -> AboutScreen(theme, updater) { screen = Screen.MENU }
             else -> {}
         }
-    }
-}
-
-@Composable
-private fun StatusBar(scene: ScopeScene?, game: GameController?, theme: ScopeTheme, updateAvailable: Boolean, onPause: () -> Unit) {
-    val meta = scene?.airport?.meta
-    val clock by produceState("--:--:--Z") {
-        val f = DateTimeFormatter.ofPattern("HH:mm:ss'Z'")
-        while (true) { value = ZonedDateTime.now(ZoneOffset.UTC).format(f); delay(1000) }
-    }
-    val title = meta?.name?.uppercase()?.removeSuffix(" INTERNATIONAL")?.replaceFirst(" ", " / ") ?: ""
-    val st = TextStyle(Color(theme.text), 11.sp, fontFamily = Mono)
-    Row(
-        Modifier.fillMaxWidth().background(Color(theme.panel)).padding(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            BasicText(meta?.icao ?: "----", style = st.copy(Color(theme.label), fontWeight = FontWeight.Bold))
-            BasicText(title, style = st)
-            BasicText("TWR GND", style = st)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (updateAvailable) BasicText(
-                "UPDATE",
-                Modifier.border(1.dp, Color(theme.selected)).padding(horizontal = 6.dp, vertical = 2.dp),
-                style = st.copy(Color(theme.selected), 10.sp, fontWeight = FontWeight.Bold),
-            )
-            if (game != null) {
-                game.rev; game.secRev
-                val sim = game.sim
-                val sc = sim.score
-                BasicText("SCORE ${sc.score}", style = st.copy(Color(theme.accent), 12.sp, fontWeight = FontWeight.Bold))
-                val max = sim.config.maxStrikes
-                BasicText((0 until max).joinToString("") { if (it < sc.strikes) "●" else "○" }, style = st.copy(Color(if (sc.strikes > 0) theme.warn else theme.dim), 13.sp))
-                val left = sim.timeLeft
-                val shown = if (left >= 0) left.toInt() else sim.time.toInt()
-                BasicText((if (left >= 0) "T-" else "T+") + "%d:%02d".format(shown / 60, shown % 60), style = st.copy(Color(if (left in 0.0..30.0) theme.warn else theme.text), 12.sp, fontWeight = FontWeight.Bold))
-                BasicText("WIND ${sim.windText}", style = st)
-                val vis = sim.ops.visibilityM
-                BasicText(if (vis >= 10000) "VIS 10KM" else "VIS ${vis}M", style = st.copy(Color(if (vis < 10000) theme.warn else theme.dim), fontWeight = if (vis < 10000) FontWeight.Bold else FontWeight.Normal))
-                Column(
-                    Modifier.size(width = 92.dp, height = 48.dp).clickable { game.toggleRwySheet() },
-                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-                ) {
-                    BasicText("RWY", style = st.copy(Color(theme.dim), 8.sp))
-                    BasicText("${sim.runwayConfig.dep}/${sim.runwayConfig.arr}".let { if (sim.runwayConfig.mixed) sim.runwayConfig.dep else it },
-                        Modifier.border(if (game.rwySheet) 2.dp else 1.dp, Color(if (game.rwySheet) theme.selected else theme.text)).padding(horizontal = 6.dp, vertical = 1.dp),
-                        style = st.copy(Color(if (game.rwySheet) theme.selected else theme.text), 12.sp, fontWeight = FontWeight.Bold))
-                }
-            }
-            BasicText(clock, style = st)
-            if (game != null) {
-                val sp = game.speed
-                val col = Color(if (sp > 1) theme.selected else theme.text)
-                Column(
-                    Modifier.size(width = 64.dp, height = 48.dp).clickable { game.cycleSpeed() },
-                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-                ) {
-                    BasicText("SPEED", style = st.copy(Color(theme.dim), 8.sp))
-                    BasicText("${sp}X", Modifier.border(if (sp > 1) 2.dp else 1.dp, col).padding(horizontal = 8.dp, vertical = 1.dp), style = st.copy(col, 14.sp, fontWeight = FontWeight.Bold))
-                }
-            }
-            // Visible box stays 28dp; the tap area is wider so it is easy to hit without growing the bar.
-            Box(Modifier.size(width = 48.dp, height = 36.dp).clickable(onClick = onPause), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(28.dp).border(1.dp, Color(theme.dim)), contentAlignment = Alignment.Center) {
-                    BasicText("II", style = st.copy(Color(theme.dim), fontWeight = FontWeight.Bold))
-                }
-            }
+        if (restoring) Box(Modifier.fillMaxSize().background(Color(theme.bg).copy(alpha = 0.92f)).clickable(enabled = false) {}, contentAlignment = Alignment.Center) {
+            BasicText("Restoring shift…", style = TextStyle(Color(theme.accent), 16.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
         }
     }
 }
-
 
 /** "Resume shift?" at launch when a shift was saved. */
 @Composable

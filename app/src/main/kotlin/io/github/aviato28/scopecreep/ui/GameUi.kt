@@ -48,7 +48,7 @@ private fun Chip(t: ScopeTheme, text: String, sub: String? = null, hot: Boolean 
     val line = Color(if (hot) t.selected else if (accent) t.departure else t.panelLine)
     Box(
         Modifier.heightIn(min = 52.dp).widthIn(min = 76.dp).background(Color(if (hot) 0x331B6070 else t.panel)).border(if (hot) 2.dp else 1.dp, line)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 6.dp),
+            .clickable { io.github.aviato28.scopecreep.fx.Fx.tick(); onClick() }.padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -74,7 +74,7 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                     val legal = g.sim.legalInstructions(a)
                     if (legal.isEmpty()) BasicText(a.instruction, style = TextStyle(Color(t.dim), 12.sp, fontFamily = Mono))
                     for (k in legal) {
-                        val label = if (k == InstructionKind.CROSS_RUNWAY) "CROSS RWY ${g.sim.crossingRunwayName(a)}" else k.label
+                        val label = if (k == InstructionKind.CROSS_RUNWAY) "CROSS RWY ${g.sim.crossingRunwayName(a)}" else if (k == InstructionKind.VACATE_VIA && a.btWait) "BACKTRACK + VACATE" else k.label
                         val hot = k == InstructionKind.GO_AROUND && a.state == AcState.FINAL
                         Chip(t, label, accent = !hot) { g.instruct(k) }
                     }
@@ -89,7 +89,7 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                     Chip(t, "X") { g.back() }
                 }
                 Mode.EXIT -> {
-                    BasicText(if (a.state == AcState.FINAL) "CLEARED. VACATE VIA" else "VACATE VIA", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
+                    BasicText(if (a.state == AcState.FINAL) "CLEARED. VACATE VIA" else if (a.btWait) "BACKTRACK RWY ${a.rwyEnd}, VACATE VIA" else "VACATE VIA", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
                     if (g.exitList.isEmpty()) BasicText("NO EXIT AHEAD", style = TextStyle(Color(t.warn), 12.sp, fontFamily = Mono))
                     val chosen = g.chosenExitId()
                     for (e in g.exitList) {
@@ -104,7 +104,7 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                     g.destList.forEachIndexed { i, d ->
                         if (d.stand) Chip(t, "STAND ${d.label}", if (a.standDest?.node == d.node) "ASSIGNED" else "FREE", accent = true) { g.chooseDest(d) }
                         else Chip(t, "${d.runway} - ${d.label}",
-                            if (g.sim.ops.lvp) (if (d.category != "CAT1") d.category else "CAT III HOLD") else if (i == 0 && d.runway == g.sim.runwayConfig.dep) "DEP RWY" else "OTHER RWY", accent = true) { g.chooseDest(d) }
+                            if (g.sim.ops.lvp) (if (d.category != "CAT1") d.category else "CAT III HOLD") else if (g.sim.isIntersection(d)) "INTERSECTION" else if (i == 0 && d.runway == g.sim.runwayConfig.dep) "DEP RWY" else "OTHER RWY", accent = true) { g.chooseDest(d) }
                     }
                     Chip(t, "CANCEL") { g.back() }
                 }
@@ -132,16 +132,19 @@ fun PreviewBanner(g: GameController, t: ScopeTheme, modifier: Modifier = Modifie
         style = TextStyle(Color(t.selected), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
 }
 
-/** Last 3 radio lines, semi-transparent, top-left. */
+/** Radio log: one collapsed line (the latest transmission) at the bottom-left; tap to expand the last six, tap again to collapse. */
 @Composable
 fun RadioLog(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     g.rev
     val log = g.sim.log
     if (log.isEmpty()) return
-    Column(modifier.widthIn(max = 380.dp).background(Color(t.bg).copy(alpha = 0.6f)).padding(6.dp)) {
-        for (i in maxOf(0, log.size - 3) until log.size) {
+    val open = g.logOpen
+    val n = if (open) 6 else 1
+    Column(modifier.widthIn(max = if (open) 440.dp else 360.dp).background(Color(t.bg).copy(alpha = 0.72f)).border(1.dp, Color(t.panelLine)).clickable { g.logOpen = !open }
+        .heightIn(min = 32.dp).padding(horizontal = 6.dp, vertical = 4.dp), verticalArrangement = Arrangement.Center) {
+        for (i in maxOf(0, log.size - n) until log.size) {
             val l = log[i]; val m = (l.time / 60).toInt(); val s = (l.time % 60).toInt()
-            BasicText("%02d:%02d %s %s".format(m, s, if (l.fromAtc) "GND" else "ACFT", l.text),
+            BasicText("%02d:%02d %s %s".format(m, s, if (l.fromAtc) "GND" else "ACFT", l.text), maxLines = if (open) 3 else 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 style = TextStyle(Color(if (l.warn) t.warn else if (l.fromAtc) t.text else t.departure), 10.sp, fontFamily = Mono, fontWeight = if (l.warn) FontWeight.Bold else FontWeight.Normal))
         }
     }
@@ -154,9 +157,10 @@ private fun stateText(g: GameController, a: Aircraft): String = when (a.state) {
     AcState.TAXIING -> if (a.held) "HELD" else if (a.crossing) "CROSSING" else (if (a.escort != null) "FOLLOW-ME - " else if (a.isArrival) "TAXI IN - " else "TAXI ") + (a.route?.refs?.joinToString(" ") ?: "") + (a.destination?.let { " TO ${it.label}" } ?: "")
     AcState.HOLDING_SHORT -> "HOLD SHORT ${a.destination?.label ?: ""}"
     AcState.LINED_UP -> "LINED UP"; AcState.TAKEOFF_ROLL -> "ROLLING"; AcState.AIRBORNE -> "AIRBORNE"
-    AcState.FINAL -> if (a.cleared) "LANDING ${a.rwyEnd}" else "FINAL ${a.rwyEnd}"; AcState.ROLLOUT -> "ROLLOUT ${a.rwyEnd}"
+    AcState.FINAL -> if (a.cleared) "LANDING ${a.rwyEnd}" else "FINAL ${a.rwyEnd}"; AcState.ROLLOUT -> if (a.btWait) "REQ BACKTRACK ${a.rwyEnd}" else "ROLLOUT ${a.rwyEnd}"
     AcState.VACATING -> "VACATING ${a.exitLabel}"; AcState.VACATED -> "REQ TAXI IN"; AcState.GO_AROUND -> "GO AROUND"
     AcState.HOLDING_XING -> "HOLD SHORT XING"
+    AcState.BACKTRACKING -> if (a.btPhase == 1) "TURNING ON PAD" else "BACKTRACK ${if (a.isArrival) a.rwyEnd else (a.destination?.runway ?: "")}"
     AcState.ABORTED -> if (a.stopped) "REJECTED TKOF - STOPPED" else "REJECTED TKOF - BRAKING"
 }
 

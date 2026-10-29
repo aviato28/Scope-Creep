@@ -180,7 +180,7 @@
 {"category":"CAT1","id":"h-osm-9064597845","node":"n-osm-9064597845","ref":"D1","refGenerated":true,"runway":"rwy-osm-98623865","type":"runway"},
 {"category":"CAT1","id":"h-gen-e-osm-1327654693-1","node":"n-da6d1f","ref":"G9","refGenerated":true,"runway":"rwy-osm-98623865","type":"runway"},
 {"category":"CAT1","id":"h-osm-9064597885","node":"n-osm-9064597885","ref":"C1","refGenerated":true,"runway":"rwy-osm-98623865","type":"runway"},
-{"category":"CAT1","id":"h-osm-9871581531","node":"n-osm-9871581531","ref":null,"refGenerated":false,"runway":"rwy-osm-98623865","type":"intermediate"}
+{"category":"CAT1","id":"h-osm-9871581531","node":"n-osm-9871581531","ref":"G1","refGenerated":false,"refSource":"override","runway":"rwy-osm-98623865","type":"runway"}
 ],
 "labels":[
 

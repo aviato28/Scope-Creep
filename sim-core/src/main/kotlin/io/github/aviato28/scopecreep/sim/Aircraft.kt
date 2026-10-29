@@ -9,6 +9,8 @@ enum class AcState {
     FINAL, ROLLOUT, VACATING, VACATED, GO_AROUND,
     /** Stopped before a runway crossing, waiting for CROSS RUNWAY. */
     HOLDING_XING,
+    /** Taxiing along the runway under a BACKTRACK clearance (departure to the turn pad, arrival to the pad then back to its exit), including the turn. */
+    BACKTRACKING,
     /** Rejected takeoff: braking, then stopped on the runway until VACATE VIA. */
     ABORTED,
 }
@@ -17,6 +19,7 @@ enum class InstructionKind(val label: String) {
     PUSHBACK("PUSHBACK APPROVED"), TAXI("TAXI"), HOLD_POSITION("HOLD POSITION"), CONTINUE("CONTINUE"), AMEND_ROUTE("AMEND ROUTE"),
     LINE_UP("LINE UP AND WAIT"), TAKEOFF("CLEARED FOR TAKEOFF"),
     CLEARED_TO_LAND("CLEARED TO LAND"), GO_AROUND("GO AROUND"), VACATE_VIA("VACATE VIA"), CROSS_RUNWAY("CROSS RUNWAY"),
+    BACKTRACK_LINE_UP("BACKTRACK + LINE UP"), BACKTRACK_TAKEOFF("BACKTRACK + TAKEOFF"),
 }
 
 sealed interface Command { val aircraftId: Int }
@@ -35,6 +38,8 @@ data class GoAround(override val aircraftId: Int) : Command
 data class VacateVia(override val aircraftId: Int, val exitIdx: Int = -1, val exitId: String? = null) : Command
 data class TaxiToStand(override val aircraftId: Int, val route: Route) : Command
 data class CrossRunway(override val aircraftId: Int) : Command
+/** "Backtrack runway 24, line up and wait" ([takeoff] false) or "..., cleared for takeoff" (true): taxi along the runway to the turn pad, turn, line up. */
+data class BacktrackRunway(override val aircraftId: Int, val takeoff: Boolean = false) : Command
 /** Taxi behind a follow-me vehicle: for routes that use escort-only edges. Valid for REQUEST_TAXI and VACATED aircraft. */
 data class FollowMeTaxi(override val aircraftId: Int, val route: Route) : Command
 
@@ -118,6 +123,16 @@ class Aircraft(
     var goArounds = 0
     var lastRecall = 0.0
     var goAroundReason: GoAroundReason? = null
+
+    // ---- backtrack ----
+    /** Arrival stopped past its last exit and asking to backtrack. */
+    var btWait = false
+    /** The arrival has come to a stop and is waiting for the controller. */
+    var btStopped = false
+    /** 0 = driving to the turn pad, 1 = turning (the arrival then continues as VACATING back to its exit). */
+    var btPhase = 0
+    var btTakeoff = false
+    var btExit: RunwayExit? = null
 
     // ---- follow-me ----
     var escort: FollowMe? = null

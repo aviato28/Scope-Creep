@@ -18,6 +18,8 @@ enum class GameMode(val label: String, val rules: String) {
 
 object Modes {
     const val AIRPORT = "VOBL"
+    /** The airports offered in the airport select step (all of them are drafts until the maintainer approves them). */
+    val AIRPORTS = listOf("VOBL", "VOML")
     const val SHIFT_SECONDS = 420.0
 
     /** Stable 64-bit FNV-1a of "<UTC date>VOBL" (the Daily seed; no backend). */
@@ -27,7 +29,7 @@ object Modes {
         return h
     }
 
-    fun seed(mode: GameMode): Long = if (mode == GameMode.DAILY) dailySeed() else System.currentTimeMillis()
+    fun seed(mode: GameMode, icao: String = AIRPORT): Long = if (mode == GameMode.DAILY) dailySeed(icao = icao) else System.currentTimeMillis()
 
     /** Sim tunables for a mode. [tutorial] (first-ever shift): low pressure, calm wind, strikes never end it. */
     fun config(mode: GameMode, tutorial: Boolean): SimConfig {
@@ -49,18 +51,28 @@ class Prefs(context: Context) {
     var modern by mutableStateOf(sp.getBoolean("modern", false)); private set
     var autoDrop by mutableStateOf(sp.getBoolean("autoDrop", true)); private set
     var onboardingDone by mutableStateOf(sp.getBoolean("onboardingDone", false)); private set
-    val theme: ScopeTheme get() = if (modern) ScopeTheme.ModernSurface else ScopeTheme.Phosphor
+    var sound by mutableStateOf(sp.getBoolean("sound", true)); private set
+    var haptics by mutableStateOf(sp.getBoolean("haptics", true)); private set
+    /** Night / dim display. */
+    var night by mutableStateOf(sp.getBoolean("night", false)); private set
+    val theme: ScopeTheme get() = if (modern) (if (night) ScopeTheme.ModernSurfaceDim else ScopeTheme.ModernSurface) else (if (night) ScopeTheme.PhosphorDim else ScopeTheme.Phosphor)
     fun updateModern(v: Boolean) { modern = v; sp.edit().putBoolean("modern", v).apply() }
     fun updateAutoDrop(v: Boolean) { autoDrop = v; sp.edit().putBoolean("autoDrop", v).apply() }
     fun updateOnboardingDone(v: Boolean) { onboardingDone = v; sp.edit().putBoolean("onboardingDone", v).apply() }
-    fun best(m: GameMode): Int = sp.getInt("best_${m.name}", 0)
-    /** Stores [score] when it beats the local best; returns true if it did. Daily keeps its best per UTC date. */
-    fun submitBest(m: GameMode, score: Int): Boolean {
-        val key = if (m == GameMode.DAILY) "best_DAILY_${java.time.LocalDate.now(java.time.ZoneOffset.UTC)}" else "best_${m.name}"
-        val old = sp.getInt(key, 0)
-        if (score > old) { sp.edit().putInt(key, score).apply(); return true }
+    fun updateSound(v: Boolean) { sound = v; sp.edit().putBoolean("sound", v).apply() }
+    fun updateHaptics(v: Boolean) { haptics = v; sp.edit().putBoolean("haptics", v).apply() }
+    fun updateNight(v: Boolean) { night = v; sp.edit().putBoolean("night", v).apply() }
+
+    /** Best scores are kept per airport and mode (VOBL keeps the scores recorded before airports were selectable). Daily keeps its best per UTC date. */
+    private fun key(m: GameMode, icao: String): String {
+        val base = if (m == GameMode.DAILY) "best_DAILY_${java.time.LocalDate.now(java.time.ZoneOffset.UTC)}" else "best_${m.name}"
+        return if (icao == Modes.AIRPORT) base else "${icao}_$base"
+    }
+    /** Stores [score] when it beats the local best for [icao] and [m]; returns true if it did. */
+    fun submitBest(m: GameMode, score: Int, icao: String = Modes.AIRPORT): Boolean {
+        val k = key(m, icao); val old = sp.getInt(k, 0)
+        if (score > old) { sp.edit().putInt(k, score).apply(); return true }
         return false
     }
-    fun bestFor(m: GameMode): Int =
-        if (m == GameMode.DAILY) sp.getInt("best_DAILY_${java.time.LocalDate.now(java.time.ZoneOffset.UTC)}", 0) else best(m)
+    fun bestFor(m: GameMode, icao: String = Modes.AIRPORT): Int = sp.getInt(key(m, icao), 0)
 }
