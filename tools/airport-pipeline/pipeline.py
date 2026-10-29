@@ -112,6 +112,62 @@ def in_poly(p, poly):
     return c
 
 
+META_KEYS = {"elevation": "elevationM", "elevationM": "elevationM", "magneticVariation": "magneticVariationDeg",
+             "magneticVariationDeg": "magneticVariationDeg", "name": "name"}  # status/approved* are never overridable
+
+
+def edge_way(eid):
+    m = re.match(r"e-osm-(\d+)-\d+", eid)
+    return m.group(1) if m else None
+
+
+def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, used):
+    """Last pipeline step. Ids are the stable ids; unknown ids only warn (OSM updates can remove them).
+    Precedence for edges: edge id over way id. Returns the number of applied overrides. Mutates its arguments."""
+    n = 0
+    ebyid = {e["id"]: e for e in edges}
+    ways_present = {edge_way(e["id"]) for e in edges}
+    orphan = []
+    def ref_of(d): return d.get("ref")
+    for wid, d in sorted(ov.get("ways", {}).items()):
+        if wid not in ways_present: orphan.append("ways/" + wid); continue
+        for e in edges:
+            if edge_way(e["id"]) == wid and e["id"] not in ov.get("edges", {}) and "ref" in d:
+                e["ref"], e["refSource"] = ref_of(d), "override"; n += 1
+    for eid, d in sorted(ov.get("edges", {}).items()):
+        if eid not in ebyid: orphan.append("edges/" + eid); continue
+        if "ref" in d: ebyid[eid]["ref"], ebyid[eid]["refSource"] = ref_of(d), "override"; n += 1
+        if "widthM" in d: ebyid[eid]["widthM"] = float(d["widthM"]); n += 1
+    hbyid = {h["id"]: h for h in holds}
+    for hid, d in sorted(ov.get("holds", {}).items()):
+        if hid not in hbyid: orphan.append("holds/" + hid); continue
+        h = hbyid[hid]
+        if d.get("delete"): h["_del"] = True; n += 1; continue
+        if "ref" in d: h["ref"], h["refGenerated"], h["refSource"], h["_ov"] = ref_of(d), False, "override", True; n += 1
+    holds[:] = [h for h in holds if not h.get("_del")]
+    # hold refs follow a renamed connector, unless explicitly overridden
+    for h in holds:
+        e = ebyid.get(h.get("_edge"))
+        if h.get("_ov") or h["type"] != "runway" or not e or e.get("refSource") != "override": continue
+        tr = (e["ref"] or "").split(";")[0] or None
+        if tr is None: continue
+        if re.search(r"\d$", tr): h["ref"] = tr
+        else:
+            k = (h["runway"][len("rwy-osm-"):], tr); used[k] = used.get(k, 0) + 1; h["ref"] = f"{tr}{used[k]}"
+    sids = {i for i, *_ in stands_raw}
+    for sid, d in sorted(ov.get("stands", {}).items()):
+        i = sid[len("s-osm-"):] if sid.startswith("s-osm-") else None
+        if i not in sids: orphan.append("stands/" + sid); continue
+        if "ref" in d:
+            stands_raw[:] = [(a_, b_, d["ref"], c_) if a_ == i else (a_, b_, r_, c_) for a_, b_, r_, c_ in stands_raw]
+            marks.add((i, "override")); n += 1
+    for k, v in sorted(ov.get("meta", {}).items()):
+        if k in META_KEYS: meta_ov[META_KEYS[k]] = v; n += 1
+        else: orphan.append("meta/" + k + " (not overridable)")
+    if orphan: warn.append("unknown override ids (removed by an OSM update, or typo): " + ", ".join(orphan))
+    return n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--osm-dir", required=True)
@@ -123,6 +179,7 @@ def main():
     ap.add_argument("--mag-var", type=float, required=True, help="magnetic variation, deg (east positive)")
     ap.add_argument("--elevation", type=float, required=True)
     ap.add_argument("--radius", type=float, default=9000.0, help="keep stands/polygons within this many m of origin")
+    ap.add_argument("--overrides", help="overrides.json (default: <out>/overrides.json)")
     a = ap.parse_args()
     lat0, lon0 = map(float, a.origin.split(","))
     kx = math.radians(1) * R_EARTH * math.cos(math.radians(lat0)); ky = math.radians(1) * R_EARTH
@@ -394,16 +451,24 @@ def main():
         else:
             n = used.get((w, tr), 0) + 1; used[(w, tr)] = n; gen = f"{tr}{n}"
         holds.append({"id": hid, "node": node, "runway": "rwy-osm-" + w, "ref": gen, "refGenerated": True,
-                      "category": "CAT1", "type": "runway"})
+                      "category": "CAT1", "type": "runway", "_edge": e["id"]})
     for n, h in sorted(osm_by_node.items(), key=lambda kv: int(kv[1])):
         if n in osm_used: continue
         p = npos[n]; w = min(rw_geo, key=lambda r: project_poly(p, r[2])[0])[0]
         holds.append({"id": "h-osm-" + h, "node": n, "runway": "rwy-osm-" + w, "ref": None, "refGenerated": False,
                       "category": "CAT1", "type": "intermediate"})
+    # ---- overrides (last step before output; see apply_overrides)
+    ov_warn, ov_n, meta_ov = [], 0, {}
+    ov_marks = set()
+    ov_path = a.overrides or os.path.join(a.out, "overrides.json")
+    if os.path.exists(ov_path):
+        with open(ov_path, encoding="utf-8") as f:
+            ov = json.load(f)
+        ov_n = apply_overrides(ov, edges, holds, stands_raw, ov_warn, meta_ov, ov_marks, rw_geo, used)
     seen_ref = {}
     for h in holds:
         k = (h["runway"], h["ref"])
-        if h["ref"] and h["type"] == "runway" and k in seen_ref:
+        if h["ref"] and h["type"] == "runway" and k in seen_ref and h.get("refSource") != "override":
             n = 2
             while (h["runway"], f"{h['ref']}-{n}") in seen_ref: n += 1
             hold_issues.append(f"{h['id']}: separate entry with the same ref as {seen_ref[k]} on {h['runway']}, renamed {h['ref']}-{n}")
@@ -433,9 +498,10 @@ def main():
 
     # ---- stands output
     stands = []
+    ov_stands = {i for i, p, r, ae in stands_raw if (i, "override") in ov_marks}
     for i, p, r, ae in stands_raw:
         ap_id = next((x["id"] for x in aprons if in_poly(p, x["polygon"])), None)
-        stands.append({"id": "s-osm-" + i, "ref": r, "node": stand_nodes.get(i), "heading": None, "maxCode": None,
+        stands.append({"id": "s-osm-" + i, "ref": r, **({"refSource": "override"} if i in ov_stands else {}), "node": stand_nodes.get(i), "heading": None, "maxCode": None,
                        "apron": ap_id, "terminal": None, "type": "contact" if ae == "gate" else None, "x": p[0], "y": p[1],
                        "leadIn": i not in lead_missing})
 
@@ -449,7 +515,9 @@ def main():
         if e["refSource"]: o["refSource"] = e["refSource"]
         if len(e["poly"]) > 2: o["shape"] = [[round(x, 1), round(y, 1)] for x, y in e["poly"][1:-1]]
         gedges.append(o)
-    for h in holds: h["node"] = h["node"] if h["node"] in used_nodes else None
+    for h in holds:
+        h["node"] = h["node"] if h["node"] in used_nodes else None
+        h.pop("_edge", None); h.pop("_ov", None)
     doc = {"schemaVersion": 1,
            "meta": {"icao": a.icao, "name": a.name, "status": "draft", "approvedBy": None, "approvedDate": None,
                     "origin": {"lat": lat0, "lon": lon0}, "magneticVariationDeg": a.mag_var, "elevationM": a.elevation,
@@ -460,6 +528,7 @@ def main():
            "holds": holds, "stands": sorted(stands, key=lambda s: s["id"]),
            "aprons": sorted(aprons, key=lambda x: x["id"]), "buildings": sorted(blds, key=lambda x: x["id"]), "labels": []}
 
+    for k, v in meta_ov.items(): doc["meta"][k] = v
     # ---- validation / unresolved
     errs, unres = [], []
     ids = {n["id"] for n in gnodes}
@@ -471,6 +540,7 @@ def main():
     unres += [f"s-osm-{i}: stand without ref" for i, p, r, ae in stands_raw if not r]
     unres += [f"s-osm-{s}: no taxiway within {MAX_STAND_LEAD:.0f} m, stand not connected" for s in lead_missing]
     unres += hold_issues
+    unres += ["overrides: " + w for w in ov_warn]
     os.makedirs(os.path.join(a.out, "review"), exist_ok=True)
     def line(x): return json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     parts = []
@@ -491,6 +561,8 @@ def main():
     print(f"{a.icao}: runways={len(runways)} nodes={len(gnodes)} edges={len(gedges)} (taxiway={c('taxiway')} taxilane={c('taxilane')} runway={c('runway')})"
           f" holds={len(holds)} stands={len(stands)} (no ref {sum(1 for s in stands if not s['ref'])}, unconnected {len(lead_missing)})"
           f" aprons={len(aprons)} buildings={len(blds)}")
+    print(f"overrides applied={ov_n}")
+    for w in ov_warn: print("WARNING overrides:", w, file=sys.stderr)
     print(f"propagated refs={sum(1 for e in gedges if e.get('refSource')=='propagated')} unresolved={len(unres)} dup-skipped={dup} zero-skipped={zero} rwy-links={rwylinks}")
     for e in errs: print("ERROR", e)
     sys.exit(1 if errs else 0)

@@ -227,16 +227,20 @@ Final distances for the game may be rounded for visual clarity; they only need t
 
 Failure reports are plain text, one issue per line with the stable ID, so an agent or the maintainer can fix it in `overrides.json`.
 
-### Overrides format (sketch)
+### Overrides format
+
+`airports/<ICAO>/overrides.json`, applied by the pipeline as its last step, keyed by stable ids. Implemented sections (the earlier set/delete/add/move sketch is not implemented yet):
 
 ```json
 { "schemaVersion": 1,
-  "set":    [ { "id": "e-2c81d0", "ref": "A" } ],
-  "delete": [ "e-9aa012" ],
-  "add":    [ { "type": "edge", "from": "n-a", "to": "n-b", "ref": "B2", "kind": "taxiway" } ],
-  "move":   [ { "id": "n-7f3a91", "x": 413.0, "y": -309.5 } ],
-  "notes":  { "e-2c81d0": "verified against charts by maintainer, 2026-11-02" } }
+  "meta":   { "elevationM": 915, "magneticVariationDeg": -1.5 },
+  "ways":   { "1059165752": { "ref": "A2" } },
+  "edges":  { "e-osm-1059165752-1": { "ref": "A2", "widthM": 23 } },
+  "holds":  { "h-gen-e-osm-1175618534-3": { "ref": "A2" }, "h-osm-123": { "delete": true } },
+  "stands": { "s-osm-11083491360": { "ref": "12" } } }
 ```
+
+Edge ids win over `ways` (an OSM way id renames every edge of that way). Overridden values get `refSource: "override"`. A generated hold ref follows its connector when the connector is renamed, unless the hold is itself overridden. Unknown ids (removed by an OSM update) are reported as warnings in `review/unresolved.txt` and stderr, never dropped silently. `status` and `approved*` cannot be overridden. `tools/airport-pipeline/review.py` writes `review/review.svg|png`, `north-runway-holds.png` and `unnamed.md` (short ids H#n/W#n mapped to stable ids).
 
 Notes are the maintainer's own words, not quoted chart text.
 

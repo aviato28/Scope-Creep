@@ -23,5 +23,8 @@ ends agree (`refSource: "propagated"`); holds from `holding_position` nodes with
 stands from `parking_position`/`gate` nodes with a lead-in edge to the nearest taxiway within 120 m (otherwise reported);
 aprons (not disused) and terminals/hangars as polygons; runway centreline segments in the graph (`kind: runway`).
 
-Not yet done: runwayCrossing/rapidExit classification, hold generation for junctions without OSM holds, overrides,
-review sheet rendering (see the sim-core `AirportRenderTest` for a quick PNG: `./gradlew :sim-core:test -PrenderOut=DIR`).
+Overrides: `<out>/overrides.json` applied last (format in `docs/airport-data.md`).
+
+Review sheet: `NODE_PATH=$(npm root -g) python3 -I tools/airport-pipeline/review.py --airport airports/VOBL --tmp SCRATCH_DIR` (needs node + Playwright for the PNGs).
+
+Not yet done: runwayCrossing/rapidExit classification, hold generation for junctions without OSM holds.

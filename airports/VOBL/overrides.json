@@ -1,0 +1,9 @@
+{
+  "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py; refs set here get refSource \"override\". Sections: holds {id:{ref|delete}}, edges {id:{ref,widthM}}, ways {osmWayId:{ref}}, stands {id:{ref}}, meta {elevationM,magneticVariationDeg,name}.",
+  "schemaVersion": 1,
+  "meta": {},
+  "ways": {},
+  "edges": {},
+  "holds": {},
+  "stands": {}
+}
