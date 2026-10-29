@@ -23,6 +23,11 @@ class TaxiGraph(val airport: Airport) {
     /** runway id -> graph nodes on its centreline edges */
     val runwayNodes = LinkedHashMap<String, IntArray>()
 
+    /** Runway-touching nodes that routes may cross (taxi edges on both sides), the runway id, and its direction vector. */
+    val crossing = BooleanArray(nodeId.size)
+    val crossRunway = arrayOfNulls<String>(nodeId.size)
+    private val crossDir = arrayOfNulls<DoubleArray>(nodeId.size)
+
     init {
         val lists = Array(nodeId.size) { ArrayList<Int>() }
         val rwSets = HashMap<String, MutableSet<Int>>()
@@ -48,7 +53,27 @@ class TaxiGraph(val airport: Airport) {
         }
         adj = Array(nodeId.size) { lists[it].toIntArray() }
         for ((k, v) in rwSets) runwayNodes[k] = v.toIntArray()
+        // A runway node with taxi edges on both sides of the runway is a crossing: routes may pass through it.
+        for ((rid, set) in rwSets) {
+            val rw = airport.runways.first { it.id == rid }
+            val dx = rw.ends[1].threshold.x - rw.ends[0].threshold.x; val dy = rw.ends[1].threshold.y - rw.ends[0].threshold.y
+            for (n in set) {
+                var pos = false; var neg = false
+                for (ei in adj[n]) { val sd = sideOf(edges[ei], n, dx, dy); if (sd > 0) pos = true else if (sd < 0) neg = true }
+                if (pos && neg) { crossing[n] = true; crossRunway[n] = rid; crossDir[n] = doubleArrayOf(dx, dy) }
+            }
+        }
     }
+
+    private fun sideOf(e: TEdge, n: Int, dx: Double, dy: Double): Int {
+        val k = e.xs.size
+        val ex = if (e.a == n) e.xs[1] - e.xs[0] else e.xs[k - 2] - e.xs[k - 1]
+        val ey = if (e.a == n) e.ys[1] - e.ys[0] else e.ys[k - 2] - e.ys[k - 1]
+        val c = (dx * ey - dy * ex) / (hypot(dx, dy) * hypot(ex, ey)).coerceAtLeast(1e-9)
+        return if (c > 0.5) 1 else if (c < -0.5) -1 else 0 // stubs running along the runway are on neither side
+    }
+    /** Which side of the runway the edge [ei] leaves crossing node [n] on (+1 / -1). */
+    fun crossSide(ei: Int, n: Int): Int { val d = crossDir[n] ?: return 0; return sideOf(edges[ei], n, d[0], d[1]) }
 
     fun other(e: TEdge, n: Int) = if (e.a == n) e.b else e.a
 
@@ -71,8 +96,10 @@ class TaxiGraph(val airport: Airport) {
             val (d, u) = pq.poll()
             if (d > dist[u]) continue
             if (stop != null && stop(u)) break
-            if (u != src && runwayTouch[u]) continue // runway-entry nodes are terminal: no routing through the runway side
+            val thruRunway = u != src && runwayTouch[u]
+            if (thruRunway && !crossing[u]) continue // runway-entry nodes are terminal unless they are a crossing
             for (ei in adj[u]) {
+                if (thruRunway && prev[u] >= 0 && (crossSide(prev[u], u) == 0 || crossSide(ei, u) != -crossSide(prev[u], u))) continue // must continue to the far side
                 val e = edges[ei]; val v = other(e, u)
                 if (isLeaf(v) && v != leafOk) continue
                 val nd = d + cost(e)

@@ -94,8 +94,27 @@ val copyAirports = tasks.register<CopyAirports>("copyAirports") {
     out.set(layout.buildDirectory.dir("generated/airportAssets"))
 }
 
+// Shared game data (airline telephony table) lives once, in <repo>/data, and ships as assets/data/.
+abstract class CopyData : DefaultTask() {
+    @get:InputDirectory abstract val source: DirectoryProperty
+    @get:OutputDirectory abstract val out: DirectoryProperty
+
+    @TaskAction
+    fun run() {
+        val dest = out.get().asFile.resolve("data")
+        dest.deleteRecursively()
+        source.get().asFile.copyRecursively(dest)
+    }
+}
+
+val copyData = tasks.register<CopyData>("copyData") {
+    source.set(rootProject.layout.projectDirectory.dir("data"))
+    out.set(layout.buildDirectory.dir("generated/dataAssets"))
+}
+
 extensions.getByType<ApplicationAndroidComponentsExtension>().onVariants { variant ->
     variant.sources.assets?.addGeneratedSourceDirectory(copyAirports, CopyAirports::out)
+    variant.sources.assets?.addGeneratedSourceDirectory(copyData, CopyData::out)
 }
 
 dependencies {

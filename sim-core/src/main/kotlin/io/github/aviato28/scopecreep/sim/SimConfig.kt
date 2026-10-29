@@ -39,6 +39,45 @@ data class SimConfig(
     val airborneSeconds: Double = 10.0,
     val handoffExtensionM: Double = 2500.0,
 
+    // ---- arrivals (M3) ----
+    /** Arrival runway end at the start of a session (the player can change the configuration). */
+    val arrivalRunway: String = "27L",
+    val arrivalsEnabled: Boolean = true,
+    /** Mean seconds between arrivals at pressure 0 / 1 (floor keeps final spacing workable: ~90 s). */
+    val arrivalIntervalAt0: Double = 150.0, val arrivalIntervalAt1: Double = 90.0,
+    /** Arrivals appear this many seconds before touchdown (hand-off zone), uniformly in [min, max]. */
+    val finalLeadMin: Double = 65.0, val finalLeadMax: Double = 95.0,
+    val approachSpeed: Double = 80.0,        // m/s (~155 kt) on final
+    val touchdownSpeed: Double = 70.0,       // m/s
+    val touchdownZoneM: Double = 300.0,      // touchdown point beyond the threshold
+    val exitSpeed: Double = 12.0,            // m/s when turning off
+    val rolloutDecel: Double = 3.0, val rolloutMaxDecel: Double = 6.0,
+    /** Landing decision point (m before the threshold): runway must be clear; cleared-to-land needed before [noClearanceGoAroundM]. */
+    val decisionM: Double = 1852.0, val noClearanceGoAroundM: Double = 926.0, val landingRecallM: Double = 3700.0,
+    val goAroundSeconds: Double = 30.0, val goAroundRejoinMin: Double = 180.0, val goAroundRejoinMax: Double = 240.0,
+    /** Arrivals use the new arrival runway this long after a configuration change. */
+    val arrivalSwitchDelayS: Double = 120.0,
+    /** Taxi-in re-call interval for a vacated arrival waiting for a route. */
+    val taxiInRecallSeconds: Double = 30.0,
+    // crossings
+    val crossHoldM: Double = 70.0, val crossBeforeM: Double = 45.0, val crossAfterM: Double = 70.0,
+
+    // ---- wind (decision 20) ----
+    val windStartDirDeg: Double = Double.NaN, val windStartKt: Double = Double.NaN,
+    val windDrift: Boolean = true, val windDriftDegPerKey: Double = 6.0,
+    val windMaxKtAt0: Double = 14.0, val windMaxKtAt1: Double = 26.0,
+    val windVeerChanceAt0: Double = 0.01, val windVeerChanceAt1: Double = 0.06,
+    /** Tailwind above this (kt) makes arrivals report it and sometimes go around; departures ask for the other direction. */
+    val tailwindLimitKt: Double = 5.0,
+    /** Go-around probability = (tailwind - limit) * this, capped at [tailwindGoAroundMax]. */
+    val tailwindGoAroundPerKt: Double = 0.07, val tailwindGoAroundMax: Double = 0.85,
+    /** Wind-shift warning is logged this long before the favoured direction flips (random in [min,max] per flip). */
+    val windWarnMinS: Double = 120.0, val windWarnMaxS: Double = 240.0,
+
+    // ---- conflicts (batch 2a) ----
+    val headOnStrikeSeconds: Double = 20.0,
+    val junctionWindowS: Double = 10.0, val junctionStopM: Double = 25.0,
+
     /** Holds farther than this (graph metres) from the runway are not offered as departure holds. */
     val maxHoldToRunwayM: Double = 700.0,
 )

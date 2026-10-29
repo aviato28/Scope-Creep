@@ -7,6 +7,7 @@ import android.graphics.Path
 import android.graphics.Typeface
 import io.github.aviato28.scopecreep.game.GameController
 import io.github.aviato28.scopecreep.game.Mode
+import io.github.aviato28.scopecreep.sim.AcState
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 import kotlin.math.sin
 
@@ -60,10 +61,24 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
         val lh = 12.5f * d; val bh = lh * 3.1f; val gapPx = 2f * d
         for (a in sim.aircraft) {
             val px = (a.interpX(al).toFloat() - cam.cx) * z + cam.ax; val py = cam.ay - (a.interpY(al).toFloat() - cam.cy) * z
-            if (px < -80 || px > w + 80 || py < -80 || py > h + 80) continue
             val sel = a.id == g.selectedId
             val conflict = a.conflictWith != 0
-            val col = if (conflict) t.warn else if (sel) t.selected else t.departure
+            val col = if (conflict) t.warn else if (sel) t.selected else if (a.isArrival) t.arrival else t.departure
+            if (px < -80 || px > w + 80 || py < -80 || py > h + 80) {
+                // an arrival still out in the hand-off zone: a marker on the screen edge, pointing at it
+                if (a.state == AcState.FINAL) {
+                    val ex = GameController.edgeX(px, w, d); val ey = GameController.edgeY(py, h, d)
+                    val ang = Math.toDegrees(Math.atan2((px - ex).toDouble(), -(py - ey).toDouble())).toFloat()
+                    c.save(); c.translate(ex, ey); c.rotate(ang); c.scale(7f * d, 7f * d)
+                    fill.color = col; c.drawPath(chevron, fill)
+                    c.restore()
+                    txt.color = col; txt.textSize = 10.5f * d; txt.textAlign = if (ex > w / 2) Paint.Align.RIGHT else Paint.Align.LEFT
+                    c.drawText(a.callsign, ex + (if (ex > w / 2) -12f else 12f) * d, ey + 4f * d, txt)
+                    if (sel) { line.color = col; line.strokeWidth = 1.5f * d; c.drawCircle(ex, ey, 14f * d, line) }
+                    txt.textAlign = Paint.Align.LEFT
+                }
+                continue
+            }
             val third = if (conflict) "CONFLICT" else a.instruction
             val bw = maxOf(txt.measureText(a.callsign), txt.measureText(a.typeLine), txt.measureText(third)) + 8f * d
             // pick the first free slot, trying last frame's choice first

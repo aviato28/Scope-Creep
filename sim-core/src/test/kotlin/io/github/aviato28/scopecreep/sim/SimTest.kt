@@ -65,7 +65,7 @@ class VoblSimTest {
 
     /** Plays the controller: always approves, takes route #1, lines up and clears for takeoff. */
     private fun run(seed: Long, seconds: Double = 900.0, stopAtAirborne: Boolean = true): Pair<List<String>, Simulation> {
-        val sim = Simulation(airport, seed)
+        val sim = Simulation(airport, seed, SimConfig(arrivalsEnabled = false))
         val trace = ArrayList<String>()
         val seen = HashMap<Int, AcState>()
         var t = 0.0
@@ -90,7 +90,7 @@ class VoblSimTest {
     }
 
     @Test fun `destinations are 27R holds with unique refs`() {
-        val sim = Simulation(airport, 1)
+        val sim = Simulation(airport, 1, SimConfig(arrivalsEnabled = false))
         println("destinations: " + sim.destinations.joinToString { it.label })
         assertTrue(sim.destinations.size >= 3)
         assertEquals(sim.destinations.size, sim.destinations.map { it.ref }.toSet().size)
@@ -98,7 +98,7 @@ class VoblSimTest {
     }
 
     @Test fun `suggested routes on VOBL are valid and end at the hold`() {
-        val sim = Simulation(airport, 7)
+        val sim = Simulation(airport, 7, SimConfig(arrivalsEnabled = false))
         sim.step()
         val ac = sim.aircraft.first()
         var checked = 0
@@ -118,7 +118,7 @@ class VoblSimTest {
     }
 
     @Test fun `legalNextRefs is non empty at a junction`() {
-        val sim = Simulation(airport, 7); sim.step()
+        val sim = Simulation(airport, 7, SimConfig(arrivalsEnabled = false)); sim.step()
         val ac = sim.aircraft.first(); val d = sim.destinations.first()
         val opts = sim.router.legalNextRefs(ac.taxiNode, listOf(ac.taxiNode), d)
         println("options at start: " + opts.joinToString { it.ref })
@@ -135,7 +135,7 @@ class VoblSimTest {
         println(trace.joinToString("\n")); sim.log.forEach { println("%.1f %s %s".format(it.time, if (it.fromAtc) "ATC  " else "PILOT", it.text)) }
         assertEquals(1, sim.departed)
         val states = trace.filter { it.split(' ')[1] == trace.first { l -> l.endsWith("AIRBORNE") }.split(' ')[1] }.map { it.split(' ')[2] }
-        assertEquals(AcState.values().map { it.name }, states)
+        assertEquals(listOf(AcState.AT_STAND, AcState.REQUEST_PUSH, AcState.PUSHING, AcState.REQUEST_TAXI, AcState.TAXIING, AcState.HOLDING_SHORT, AcState.LINED_UP, AcState.TAKEOFF_ROLL, AcState.AIRBORNE).map { it.name }, states)
         assertTrue(sim.log.any { it.text.contains("taxi") && it.text.contains("holding point") })
     }
 
@@ -165,7 +165,7 @@ class VoblSimTest {
     }
 
     @Test fun `line up moves the aircraft onto the runway centreline`() {
-        val sim = Simulation(airport, 42)
+        val sim = Simulation(airport, 42, SimConfig(arrivalsEnabled = false))
         var done = false; var t = 0.0
         while (t < 900.0 && !done) {
             sim.step(); t += sim.config.stepSeconds
@@ -202,7 +202,7 @@ class AmendTest {
         holds = listOf(Hold("hA2", "HA", "r1", "A2"), Hold("hA4", "HB", "r1", "A4")),
         stands = listOf(Stand("st", "1", "S", x = 0.0, y = 100.0)),
     )
-    private val sim = Simulation(airport, 3, SimConfig(departureRunway = "27R"))
+    private val sim = Simulation(airport, 3, SimConfig(arrivalsEnabled = false, departureRunway = "27R"))
     private fun dest(ref: String) = sim.destinations.first { it.ref == ref }
 
     private fun taxiToA2(): Aircraft {

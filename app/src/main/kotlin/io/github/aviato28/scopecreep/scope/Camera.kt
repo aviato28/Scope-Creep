@@ -10,7 +10,7 @@ import androidx.compose.runtime.setValue
  * (cx, cy) is the world point shown at the anchor (ax, ay) = centre of the visible rectangle (the canvas minus safe
  * area and UI overlays), so the map stays put when overlays appear. Mutating bumps [version]; read it only in draw.
  */
-class Camera(private val bounds: FloatArray /* minX, minY, maxX, maxY */) {
+class Camera(private val bounds: FloatArray /* minX, minY, maxX, maxY: what the first fit shows */, private val panBounds: FloatArray = bounds /* how far the centre may move (reaches the hand-off zones) */) {
     var cx = (bounds[0] + bounds[2]) / 2; private set
     var cy = (bounds[1] + bounds[3]) / 2; private set
     var zoom = 0.1f; private set
@@ -53,13 +53,13 @@ class Camera(private val bounds: FloatArray /* minX, minY, maxX, maxY */) {
 
     /** The airport edge may reach the anchor, no further. */
     private fun clamp() {
-        cx = cx.coerceIn(bounds[0], bounds[2]); cy = cy.coerceIn(bounds[1], bounds[3])
+        cx = cx.coerceIn(panBounds[0], panBounds[2]); cy = cy.coerceIn(panBounds[1], panBounds[3])
     }
 
     companion object {
-        fun saver(bounds: FloatArray) = Saver<Camera, List<Float>>(
+        fun saver(bounds: FloatArray, panBounds: FloatArray = bounds) = Saver<Camera, List<Float>>(
             save = { listOf(it.cx, it.cy, it.zoom) },
-            restore = { s -> Camera(bounds).apply { cx = s[0]; cy = s[1]; zoom = s[2]; fitted = true } },
+            restore = { s -> Camera(bounds, panBounds).apply { cx = s[0]; cy = s[1]; zoom = s[2]; fitted = true } },
         )
     }
 }

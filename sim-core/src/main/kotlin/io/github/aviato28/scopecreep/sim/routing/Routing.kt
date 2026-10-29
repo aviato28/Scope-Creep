@@ -3,7 +3,7 @@ package io.github.aviato28.scopecreep.sim.routing
 import io.github.aviato28.scopecreep.sim.Polyline
 
 /** A departure hold point the player can send an aircraft to. */
-class Destination(val id: String, val nodeId: String, val node: Int, val ref: String?, val label: String, val runway: String, val x: Double, val y: Double)
+class Destination(val id: String, val nodeId: String, val node: Int, val ref: String?, val label: String, val runway: String, val x: Double, val y: Double, val stand: Boolean = false)
 
 /** A complete taxi route. [refs] is the chip sequence; the last element is typically the hold's own ref. */
 class Route(

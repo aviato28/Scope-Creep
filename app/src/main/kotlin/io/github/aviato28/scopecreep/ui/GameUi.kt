@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -55,19 +56,37 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                 Mode.IDLE -> {
                     val legal = g.sim.legalInstructions(a)
                     if (legal.isEmpty()) BasicText(a.instruction, style = TextStyle(Color(t.dim), 12.sp, fontFamily = Mono))
-                    for (k in legal) Chip(t, k.label, accent = true) { g.instruct(k) }
+                    for (k in legal) {
+                        val label = if (k == InstructionKind.CROSS_RUNWAY) "CROSS RWY ${g.sim.crossingRunwayName(a)}" else k.label
+                        val hot = k == InstructionKind.GO_AROUND && a.state == AcState.FINAL
+                        Chip(t, label, accent = !hot) { g.instruct(k) }
+                    }
+                    val warnStyle = TextStyle(Color(t.warn), 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold)
                     if ((a.state == AcState.HOLDING_SHORT || a.state == AcState.LINED_UP) && InstructionKind.TAKEOFF !in legal && !a.armedTakeoff)
-                        BasicText("RUNWAY OCCUPIED", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.warn), 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                        BasicText(if (a.windRefused) "CROSSWIND - UNABLE" else "RUNWAY OCCUPIED", Modifier.align(Alignment.CenterVertically), style = warnStyle)
+                    if (a.state == AcState.FINAL && !a.cleared && InstructionKind.CLEARED_TO_LAND !in legal)
+                        BasicText("RUNWAY NOT CLEAR", Modifier.align(Alignment.CenterVertically), style = warnStyle)
+                    if (a.state == AcState.HOLDING_XING && InstructionKind.CROSS_RUNWAY !in legal)
+                        BasicText("RUNWAY ACTIVE", Modifier.align(Alignment.CenterVertically), style = warnStyle)
                 }
                 Mode.PUSH -> {
                     BasicText("PUSH", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
                     for (o in g.pushOptions) Chip(t, "FACE ${o.label}", o.ref.ifEmpty { null }, accent = true) { g.choosePush(o) }
                     Chip(t, "X") { g.back() }
                 }
+                Mode.EXIT -> {
+                    BasicText("VACATE VIA", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
+                    if (g.exitList.isEmpty()) BasicText("NO EXIT AHEAD", style = TextStyle(Color(t.warn), 12.sp, fontFamily = Mono))
+                    g.exitList.forEachIndexed { i, e -> Chip(t, e.label, "EXIT", accent = true) { g.chooseExit(i) } }
+                    Chip(t, "X") { g.back() }
+                }
                 Mode.DEST -> {
-                    BasicText("TAXI TO", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
-                    if (g.destList.isEmpty()) BasicText("NO HOLD AHEAD", style = TextStyle(Color(t.departure), 12.sp, fontFamily = Mono))
-                    for (d in g.destList) Chip(t, "${d.runway} - ${d.label}", "DEP RWY", accent = true) { g.chooseDest(d) }
+                    BasicText(if (a.isArrival) "TAXI TO STAND" else "TAXI TO", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
+                    if (g.destList.isEmpty()) BasicText(if (a.isArrival) "NO STAND FREE" else "NO HOLD AHEAD", style = TextStyle(Color(t.departure), 12.sp, fontFamily = Mono))
+                    g.destList.forEachIndexed { i, d ->
+                        if (d.stand) Chip(t, "STAND ${d.label}", if (a.standDest?.node == d.node) "ASSIGNED" else "FREE", accent = true) { g.chooseDest(d) }
+                        else Chip(t, "${d.runway} - ${d.label}", if (i == 0 && d.runway == g.sim.runwayConfig.dep) "DEP RWY" else "OTHER RWY", accent = true) { g.chooseDest(d) }
+                    }
                     Chip(t, "X") { g.back() }
                 }
                 Mode.ROUTES -> {
@@ -94,7 +113,7 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
 @Composable
 fun PreviewBanner(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     g.rev
-    val text = when (g.mode) { Mode.PUSH -> "PUSHBACK: PICK FACING"; Mode.DEST -> if (g.amend) "AMEND ROUTE: PICK A HOLD" else "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
+    val text = when (g.mode) { Mode.PUSH -> "PUSHBACK: PICK FACING"; Mode.EXIT -> "VACATE: PICK AN EXIT"; Mode.DEST -> if (g.amend) "AMEND ROUTE: PICK A DESTINATION" else "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
     if (text.isEmpty()) return
     BasicText(text, modifier.background(Color(t.panel)).border(1.dp, Color(t.selected)).padding(horizontal = 10.dp, vertical = 5.dp),
         style = TextStyle(Color(t.selected), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
@@ -117,8 +136,11 @@ fun RadioLog(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
 
 private fun stateText(a: Aircraft) = when (a.state) {
     AcState.AT_STAND -> "ST ${a.standRef}"; AcState.REQUEST_PUSH -> "REQUEST PUSH"; AcState.PUSHING -> "PUSHING"
-    AcState.REQUEST_TAXI -> "REQUEST TAXI"; AcState.TAXIING -> if (a.held) "HELD" else "TAXI"; AcState.HOLDING_SHORT -> "HOLD SHORT ${a.destination?.label ?: ""}"
+    AcState.REQUEST_TAXI -> "REQUEST TAXI"; AcState.TAXIING -> if (a.held) "HELD" else if (a.isArrival) "TAXI IN" else "TAXI"; AcState.HOLDING_SHORT -> "HOLD SHORT ${a.destination?.label ?: ""}"
     AcState.LINED_UP -> "LINED UP"; AcState.TAKEOFF_ROLL -> "TAKEOFF ROLL"; AcState.AIRBORNE -> "AIRBORNE"
+    AcState.FINAL -> if (a.cleared) "CLEARED TO LAND" else "REQUEST LANDING"; AcState.ROLLOUT -> "ROLLOUT"
+    AcState.VACATING -> "VACATING ${a.exitLabel}"; AcState.VACATED -> "REQUEST TAXI IN"; AcState.GO_AROUND -> "GO AROUND"
+    AcState.HOLDING_XING -> "HOLD SHORT XING"
 }
 
 /** Wide screens: docked strip bay. Phones: thin rail, top 4 plus a count. Strips are ordered by urgency; tap selects. */
@@ -137,10 +159,10 @@ fun StripPanel(g: GameController, t: ScopeTheme, wide: Boolean, modifier: Modifi
             val line = Color(if (conflict) t.warn else if (sel) t.selected else t.panelLine)
             Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).border(if (sel || conflict) 2.dp else 1.dp, line)
                 .background(Color(t.bg)).clickable { g.select(a.id) }.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                BasicText(a.callsign, style = TextStyle(Color(if (conflict) t.warn else if (sel) t.selected else t.departure), if (wide) 14.sp else 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                BasicText(a.callsign, style = TextStyle(Color(if (conflict) t.warn else if (sel) t.selected else if (a.isArrival) t.arrival else t.departure), if (wide) 14.sp else 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
                 if (wide) {
-                    BasicText("${a.type.code} ${a.type.wake.code} - ST ${a.standRef}", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
-                    BasicText(a.route?.refs?.joinToString(" ")?.let { "ROUTE $it" } ?: "NO ROUTE", style = TextStyle(Color(t.text), 11.sp, fontFamily = Mono))
+                    BasicText("${a.type.code} ${a.type.wake.code} - " + (if (a.isArrival) "ARR ${a.other} ST ${a.standDest?.label ?: a.standRef}" else "ST ${a.standRef}" + (if (a.other.isNotEmpty()) " TO ${a.other}" else "")), style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+                    BasicText(a.route?.refs?.joinToString(" ")?.let { "ROUTE $it" } ?: if (a.isArrival && a.state == AcState.FINAL) "RWY ${a.rwyEnd}" else "NO ROUTE", style = TextStyle(Color(t.text), 11.sp, fontFamily = Mono))
                 }
                 BasicText(if (conflict) "CONFLICT" else stateText(a), style = TextStyle(Color(if (conflict) t.warn else t.text), if (wide) 11.sp else 8.sp, fontFamily = Mono))
                 if (a.waitSince >= 0) {
@@ -150,5 +172,36 @@ fun StripPanel(g: GameController, t: ScopeTheme, wide: Boolean, modifier: Modifi
             }
         }
         if (shown < list.size) BasicText("+${list.size - shown} MORE", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+    }
+}
+
+/** Wind and runway-configuration sheet: tap the RWY item in the top bar; each config shows live head/cross components. */
+@Composable
+fun RunwaySheet(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
+    g.rev; g.secRev
+    if (!g.rwySheet) return
+    val sim = g.sim
+    Column(modifier.widthIn(max = 460.dp).background(Color(t.panel)).border(1.dp, Color(t.selected)).padding(10.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            BasicText("RUNWAY CONFIGURATION   WIND ${sim.windText}", style = TextStyle(Color(t.selected), 12.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+            Chip(t, "X") { g.toggleRwySheet() }
+        }
+        for (c in sim.runwayConfigs) {
+            val cur = c.id == sim.runwayConfig.id
+            Column(Modifier.fillMaxWidth().heightIn(min = 52.dp).background(Color(if (cur) 0x331B6070 else t.bg)).border(if (cur) 2.dp else 1.dp, Color(if (cur) t.selected else t.panelLine))
+                .clickable { g.chooseConfig(c) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                BasicText(c.label + if (cur) "   (IN USE)" else "", style = TextStyle(Color(t.text), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                val ends = if (c.mixed) listOf(c.dep) else listOf(c.dep, c.arr)
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    for (e in ends) {
+                        val w = sim.windComponents(e)
+                        val head = if (w.head >= 0) "HW ${w.head}" else "TW ${-w.head}"
+                        val bad = w.head < -sim.config.tailwindLimitKt
+                        BasicText("$e $head XW ${w.cross}", style = TextStyle(Color(if (bad) t.warn else t.dim), 11.sp, fontFamily = Mono, fontWeight = if (bad) FontWeight.Bold else FontWeight.Normal))
+                    }
+                }
+            }
+        }
+        BasicText("Aircraft already cleared keep their clearance. New arrivals use the new runway after about 2 minutes.", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
     }
 }

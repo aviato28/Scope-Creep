@@ -1,0 +1,748 @@
+{
+ "version": 1,
+ "note": "Spoken telephony designators. verified=true only where the Wikipedia 'List of airline codes' page (a secondary list) agrees; ICAO Doc 8585 itself was not accessible. Fleets and number ranges are plausible, not authoritative.",
+ "types": {
+  "A319": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "A320": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "A321": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "A20N": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "A21N": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "B738": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "B38M": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "B737": {
+   "wake": "M",
+   "xwindKt": 33
+  },
+  "A332": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "A333": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "A359": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "A35K": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "A388": {
+   "wake": "J",
+   "xwindKt": 38
+  },
+  "B788": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "B789": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "B77W": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "B772": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "B744": {
+   "wake": "H",
+   "xwindKt": 38
+  },
+  "AT76": {
+   "wake": "M",
+   "xwindKt": 25
+  },
+  "DH8D": {
+   "wake": "M",
+   "xwindKt": 25
+  },
+  "E190": {
+   "wake": "M",
+   "xwindKt": 30
+  },
+  "A306": {
+   "wake": "H",
+   "xwindKt": 35
+  }
+ },
+ "airlines": [
+  {
+   "icao": "IGO",
+   "iata": "6E",
+   "name": "IndiGo",
+   "telephony": "IFLY",
+   "display": "IFLY",
+   "domestic": true,
+   "defaultWeight": 45,
+   "numbers": [
+    100,
+    6999
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 25
+    },
+    {
+     "type": "A20N",
+     "weight": 35
+    },
+    {
+     "type": "A321",
+     "weight": 15
+    },
+    {
+     "type": "A21N",
+     "weight": 15
+    },
+    {
+     "type": "AT76",
+     "weight": 10
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "AIC",
+   "iata": "AI",
+   "name": "Air India",
+   "telephony": "AIRINDIA",
+   "display": "Air India",
+   "domestic": true,
+   "defaultWeight": 20,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 25
+    },
+    {
+     "type": "A20N",
+     "weight": 15
+    },
+    {
+     "type": "A321",
+     "weight": 15
+    },
+    {
+     "type": "B788",
+     "weight": 15
+    },
+    {
+     "type": "B77W",
+     "weight": 15
+    },
+    {
+     "type": "A359",
+     "weight": 15
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "AXB",
+   "iata": "IX",
+   "name": "Air India Express",
+   "telephony": "EXPRESS INDIA",
+   "display": "Express India",
+   "domestic": true,
+   "defaultWeight": 10,
+   "numbers": [
+    100,
+    1999
+   ],
+   "fleet": [
+    {
+     "type": "B738",
+     "weight": 70
+    },
+    {
+     "type": "B38M",
+     "weight": 30
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "AKJ",
+   "iata": "QP",
+   "name": "Akasa Air",
+   "telephony": "AKASA AIR",
+   "display": "Akasa Air",
+   "domestic": true,
+   "defaultWeight": 15,
+   "numbers": [
+    100,
+    1999
+   ],
+   "fleet": [
+    {
+     "type": "B38M",
+     "weight": 100
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "SEJ",
+   "iata": "SG",
+   "name": "SpiceJet",
+   "telephony": "SPICEJET",
+   "display": "Spicejet",
+   "domestic": true,
+   "defaultWeight": 10,
+   "numbers": [
+    100,
+    8999
+   ],
+   "fleet": [
+    {
+     "type": "B738",
+     "weight": 70
+    },
+    {
+     "type": "DH8D",
+     "weight": 30
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "BAW",
+   "iata": "BA",
+   "name": "British Airways",
+   "telephony": "SPEEDBIRD",
+   "display": "Speedbird",
+   "domestic": false,
+   "defaultWeight": 3,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "B77W",
+     "weight": 35
+    },
+    {
+     "type": "B789",
+     "weight": 35
+    },
+    {
+     "type": "A359",
+     "weight": 30
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "QTR",
+   "iata": "QR",
+   "name": "Qatar Airways",
+   "telephony": "QATARI",
+   "display": "Qatari",
+   "domestic": false,
+   "defaultWeight": 4,
+   "numbers": [
+    500,
+    599
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 20
+    },
+    {
+     "type": "B788",
+     "weight": 25
+    },
+    {
+     "type": "B77W",
+     "weight": 30
+    },
+    {
+     "type": "A359",
+     "weight": 25
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "UAE",
+   "iata": "EK",
+   "name": "Emirates",
+   "telephony": "EMIRATES",
+   "display": "Emirates",
+   "domestic": false,
+   "defaultWeight": 4,
+   "numbers": [
+    560,
+    579
+   ],
+   "fleet": [
+    {
+     "type": "B77W",
+     "weight": 70
+    },
+    {
+     "type": "A388",
+     "weight": 30
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "SIA",
+   "iata": "SQ",
+   "name": "Singapore Airlines",
+   "telephony": "SINGAPORE",
+   "display": "Singapore",
+   "domestic": false,
+   "defaultWeight": 3,
+   "numbers": [
+    500,
+    529
+   ],
+   "fleet": [
+    {
+     "type": "A359",
+     "weight": 50
+    },
+    {
+     "type": "B77W",
+     "weight": 30
+    },
+    {
+     "type": "A388",
+     "weight": 20
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "DLH",
+   "iata": "LH",
+   "name": "Lufthansa",
+   "telephony": "LUFTHANSA",
+   "display": "Lufthansa",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A359",
+     "weight": 40
+    },
+    {
+     "type": "A333",
+     "weight": 30
+    },
+    {
+     "type": "A321",
+     "weight": 30
+    }
+   ],
+   "source": "Wikipedia lists 'DEUTSCHE LUFT HANSA' (older form); 'LUFTHANSA' is the current spoken designator by recollection",
+   "verified": false
+  },
+  {
+   "icao": "ETD",
+   "iata": "EY",
+   "name": "Etihad Airways",
+   "telephony": "ETIHAD",
+   "display": "Etihad",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    200,
+    299
+   ],
+   "fleet": [
+    {
+     "type": "B789",
+     "weight": 40
+    },
+    {
+     "type": "A320",
+     "weight": 30
+    },
+    {
+     "type": "A333",
+     "weight": 30
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "AFR",
+   "iata": "AF",
+   "name": "Air France",
+   "telephony": "AIRFRANS",
+   "display": "Airfrans",
+   "domestic": false,
+   "defaultWeight": 1,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A359",
+     "weight": 60
+    },
+    {
+     "type": "B77W",
+     "weight": 40
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "THY",
+   "iata": "TK",
+   "name": "Turkish Airlines",
+   "telephony": "TURKISH",
+   "display": "Turkish",
+   "domestic": false,
+   "defaultWeight": 3,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A321",
+     "weight": 40
+    },
+    {
+     "type": "A333",
+     "weight": 30
+    },
+    {
+     "type": "B77W",
+     "weight": 30
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "SVA",
+   "iata": "SV",
+   "name": "Saudia",
+   "telephony": "SAUDIA",
+   "display": "Saudia",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 40
+    },
+    {
+     "type": "A333",
+     "weight": 30
+    },
+    {
+     "type": "B77W",
+     "weight": 30
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "ALK",
+   "iata": "UL",
+   "name": "SriLankan Airlines",
+   "telephony": "SRILANKAN",
+   "display": "Srilankan",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    100,
+    299
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 50
+    },
+    {
+     "type": "A332",
+     "weight": 50
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "FDB",
+   "iata": "FZ",
+   "name": "flydubai",
+   "telephony": "SKYDUBAI",
+   "display": "Sky Dubai",
+   "domestic": false,
+   "defaultWeight": 3,
+   "numbers": [
+    400,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "B738",
+     "weight": 70
+    },
+    {
+     "type": "B38M",
+     "weight": 30
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "ABY",
+   "iata": "G9",
+   "name": "Air Arabia",
+   "telephony": "ARABIA",
+   "display": "Arabia",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 100
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "MAS",
+   "iata": "MH",
+   "name": "Malaysia Airlines",
+   "telephony": "MALAYSIAN",
+   "display": "Malaysian",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A332",
+     "weight": 40
+    },
+    {
+     "type": "B738",
+     "weight": 60
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "ETH",
+   "iata": "ET",
+   "name": "Ethiopian Airlines",
+   "telephony": "ETHIOPIAN",
+   "display": "Ethiopian",
+   "domestic": false,
+   "defaultWeight": 1,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "B788",
+     "weight": 50
+    },
+    {
+     "type": "B738",
+     "weight": 50
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  },
+  {
+   "icao": "GFA",
+   "iata": "GF",
+   "name": "Gulf Air",
+   "telephony": "GULF AIR",
+   "display": "Gulf Air",
+   "domestic": false,
+   "defaultWeight": 1,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 60
+    },
+    {
+     "type": "B789",
+     "weight": 40
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "KAC",
+   "iata": "KU",
+   "name": "Kuwait Airways",
+   "telephony": "KUWAITI",
+   "display": "Kuwaiti",
+   "domestic": false,
+   "defaultWeight": 1,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A320",
+     "weight": 50
+    },
+    {
+     "type": "A332",
+     "weight": 50
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "OMA",
+   "iata": "WY",
+   "name": "Oman Air",
+   "telephony": "OMAN AIR",
+   "display": "Oman Air",
+   "domestic": false,
+   "defaultWeight": 1,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "B738",
+     "weight": 60
+    },
+    {
+     "type": "B788",
+     "weight": 40
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "THA",
+   "iata": "TG",
+   "name": "Thai Airways",
+   "telephony": "THAI",
+   "display": "Thai",
+   "domestic": false,
+   "defaultWeight": 2,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A359",
+     "weight": 50
+    },
+    {
+     "type": "A333",
+     "weight": 50
+    }
+   ],
+   "source": "recalled from ICAO Doc 8585 conventions; not checked against a source",
+   "verified": false
+  },
+  {
+   "icao": "CPA",
+   "iata": "CX",
+   "name": "Cathay Pacific",
+   "telephony": "CATHAY",
+   "display": "Cathay",
+   "domestic": false,
+   "defaultWeight": 1,
+   "numbers": [
+    100,
+    999
+   ],
+   "fleet": [
+    {
+     "type": "A359",
+     "weight": 50
+    },
+    {
+     "type": "A333",
+     "weight": 50
+    }
+   ],
+   "source": "Wikipedia 'List of airline codes' (fetched 2026-10-29)",
+   "verified": true
+  }
+ ]
+}

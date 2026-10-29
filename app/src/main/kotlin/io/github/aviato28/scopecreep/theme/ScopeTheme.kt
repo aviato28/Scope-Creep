@@ -13,7 +13,7 @@ data class ScopeTheme(
     val laneStrokeDp: Float, val taxiStrokeDp: Float, val wideStrokeDp: Float,
     val runwayEdgeDp: Float, val holdStrokeDp: Float, val standStrokeDp: Float,
     val departure: Int = 0xFFFFB43A.toInt(), val selected: Int = 0xFF5FD0E8.toInt(), val routeDim: Int = 0x805FD0E8.toInt(),
-    val warn: Int = 0xFFFF4D4D.toInt(),
+    val warn: Int = 0xFFFF4D4D.toInt(), val arrival: Int = 0xFF6EE7A8.toInt(),
 ) {
     companion object {
         /** Values from mockup 01 (Phosphor Classic). */

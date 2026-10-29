@@ -13,7 +13,7 @@ class SimRenderTest {
     @Test fun frame() {
         val out = System.getProperty("render.out") ?: return
         System.setProperty("java.awt.headless", "true")
-        val a = VoblAirportTest.load(); val sim = Simulation(a, 42)
+        val a = VoblAirportTest.load(); val sim = Simulation(a, 42, SimConfig(arrivalsEnabled = false))
         var ac: Aircraft? = null; var routes = emptyList<io.github.aviato28.scopecreep.sim.routing.Route>()
         while (sim.time < 200) {
             sim.step(); ac = sim.aircraft.firstOrNull() ?: continue

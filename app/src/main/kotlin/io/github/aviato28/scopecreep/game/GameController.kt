@@ -11,12 +11,23 @@ import io.github.aviato28.scopecreep.sim.*
 import io.github.aviato28.scopecreep.sim.routing.*
 import kotlin.math.hypot
 
-enum class Mode { IDLE, DEST, ROUTES, BUILD, PUSH }
+enum class Mode { IDLE, DEST, ROUTES, BUILD, PUSH, EXIT }
 
 /** Owns the Simulation, drives it from the frame clock and holds the tap-to-route UI state (D12). */
-class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMillis()) {
+class GameController(
+    val scene: ScopeScene, seed: Long = System.currentTimeMillis(),
+    fleet: FleetDb = Fleet.default, profile: TrafficProfile = TrafficProfile.generic,
+) {
     private var nowNanos = 0L
-    val sim = Simulation(scene.airport, seed, SimConfig(), SimClock { nowNanos })
+    val sim = Simulation(scene.airport, seed, SimConfig(), SimClock { nowNanos }, fleet, profile).also {
+        // start on the configuration the wind favours; from here on the player chooses (decision 20)
+        it.setRunwayConfig(it.suggestedConfig(), silent = true)
+    }
+
+    /** The RWY sheet in the top bar. */
+    var rwySheet by mutableStateOf(false)
+    fun toggleRwySheet() { rwySheet = !rwySheet }
+    fun chooseConfig(c: RunwayConfig) { sim.setRunwayConfig(c); rwySheet = false; bump() }
 
     /** UI chrome (chips, strips, log) re-reads when this changes; the canvas re-reads [frame]. */
     var rev by mutableIntStateOf(0); private set
@@ -34,6 +45,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     /** Strips ordered by urgency; rebuilt once per sim second and on discrete changes. */
     var strips: List<Aircraft> = emptyList(); private set
     var pushOptions: List<PushOption> = emptyList(); private set
+    var exitList: List<RunwayExit> = emptyList(); private set
 
     fun cycleSpeed() { applySpeed(when (speed) { 1 -> 2; 2 -> 4; else -> 1 }) }
     private fun applySpeed(s: Int) { speed = s; sim.timeScale = s.toDouble() }
@@ -80,7 +92,9 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         if (sim.revision != lastSimRev) {
             lastSimRev = sim.revision
             val a = selected
-            val want = if (mode == Mode.PUSH) AcState.REQUEST_PUSH else if (amend) a?.state?.takeIf { it == AcState.TAXIING || it == AcState.HOLDING_SHORT } else AcState.REQUEST_TAXI
+            val want = if (mode == Mode.PUSH) AcState.REQUEST_PUSH else if (mode == Mode.EXIT) AcState.ROLLOUT
+                else if (amend) a?.state?.takeIf { it == AcState.TAXIING || it == AcState.HOLDING_SHORT || it == AcState.HOLDING_XING }
+                else if (a?.isArrival == true) AcState.VACATED else AcState.REQUEST_TAXI
             if (a == null) { selectedId = -1; reset() } else if (mode != Mode.IDLE && a.state != want) reset()
             bump(); changed = true
         }
@@ -93,7 +107,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
 
     private fun rank(a: Aircraft) = when {
         a.conflictWith != 0 -> 0
-        a.waitState != null -> 1
+        a.waitState != null || (a.state == AcState.FINAL && !a.cleared) -> 1
         a.state == AcState.TAXIING -> 2
         a.state == AcState.PUSHING -> 3
         a.state == AcState.TAKEOFF_ROLL -> 4
@@ -115,7 +129,11 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         val a = selected ?: return
         when (k) {
             InstructionKind.PUSHBACK -> { pushOptions = sim.pushOptions(a); mode = Mode.PUSH }
-            InstructionKind.TAXI -> { amend = false; destList = sim.destinations; mode = Mode.DEST }
+            InstructionKind.TAXI -> { amend = false; destList = if (a.isArrival) sim.standOptions(a) else sim.destinations; mode = Mode.DEST }
+            InstructionKind.CLEARED_TO_LAND -> sim.submit(ClearedToLand(a.id))
+            InstructionKind.GO_AROUND -> sim.submit(GoAround(a.id))
+            InstructionKind.CROSS_RUNWAY -> sim.submit(CrossRunway(a.id))
+            InstructionKind.VACATE_VIA -> { exitList = sim.exitOptions(a); mode = Mode.EXIT }
             InstructionKind.AMEND_ROUTE -> { amend = true; destList = sim.amendDestinations(a); mode = Mode.DEST }
             InstructionKind.HOLD_POSITION -> sim.submit(HoldPosition(a.id))
             InstructionKind.CONTINUE -> sim.submit(Continue(a.id))
@@ -130,6 +148,11 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         sim.submit(PushbackApproved(a.id, o.edge)); reset(); bump()
     }
 
+    fun chooseExit(i: Int) {
+        val a = selected ?: return
+        sim.submit(VacateVia(a.id, i)); reset(); bump()
+    }
+
     fun chooseDest(d: Destination) {
         val a = selected ?: return
         dest = d; routes = if (amend) sim.suggestAmend(a, d) else sim.suggestRoutes(a, d); routeIdx = 0; mode = Mode.ROUTES
@@ -141,7 +164,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     fun send() {
         val a = selected ?: return
         val r = when (mode) { Mode.ROUTES -> routes.getOrNull(routeIdx); Mode.BUILD -> build?.route(); else -> null } ?: return
-        if (amend) sim.submit(AmendRoute(a.id, r)) else sim.submit(Taxi(a.id, r))
+        if (amend) sim.submit(AmendRoute(a.id, r)) else if (a.isArrival) sim.submit(TaxiToStand(a.id, r)) else sim.submit(Taxi(a.id, r))
         reset(); bump()
     }
 
@@ -157,7 +180,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         when (mode) {
             Mode.BUILD -> { mode = Mode.ROUTES; build = null; hasBuild = false; previewText = textFor(routes.getOrNull(routeIdx)?.refs, false) }
             Mode.ROUTES -> { mode = Mode.DEST; routes = emptyList(); dest = null; hasSel = false; hasDim1 = false; hasDim2 = false; previewText = "" }
-            Mode.DEST, Mode.PUSH -> mode = Mode.IDLE
+            Mode.DEST, Mode.PUSH, Mode.EXIT -> mode = Mode.IDLE
             Mode.IDLE -> {}
         }
         bump()
@@ -166,7 +189,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     private fun textFor(refs: List<String>?, partial: Boolean): String {
         val d = dest ?: return ""
         if (refs == null) return ""
-        return if (partial) "TAXI VIA ${refs.joinToString(", ")} ..." else "TAXI VIA ${refs.joinToString(" ")} HOLD SHORT RWY ${d.runway}"
+        return if (partial) "TAXI VIA ${refs.joinToString(", ")} ..." else "TAXI VIA ${refs.joinToString(" ")} " + (if (d.stand) "STAND ${d.label}" else "HOLD SHORT RWY ${d.runway}")
     }
 
     private fun refreshBuild() {
@@ -201,8 +224,9 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         val al = sim.alpha
         var best = -1; var bd = radiusPx
         for (a in sim.aircraft) {
-            val sx = (a.interpX(al).toFloat() - cam.cx) * cam.zoom + cam.ax
-            val sy = cam.ay - (a.interpY(al).toFloat() - cam.cy) * cam.zoom
+            var sx = (a.interpX(al).toFloat() - cam.cx) * cam.zoom + cam.ax
+            var sy = cam.ay - (a.interpY(al).toFloat() - cam.cy) * cam.zoom
+            if (a.state == AcState.FINAL) { sx = edgeX(sx, cam.viewW, radiusPx / 48f); sy = edgeY(sy, cam.viewH, radiusPx / 48f) } // off-screen finals sit on the screen edge
             val d = hypot(sx - px, sy - py)
             if (d < bd) { bd = d; best = a.id }
         }
@@ -215,5 +239,11 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
             }
         }
         if (mode == Mode.IDLE) deselect()
+    }
+
+    companion object {
+        /** Off-screen arrivals on final are drawn clamped to the screen edge; the overlay and the tap handler share this clamp. */
+        fun edgeX(x: Float, w: Float, d: Float) = x.coerceIn(26f * d, (w - 26f * d).coerceAtLeast(26f * d))
+        fun edgeY(y: Float, h: Float, d: Float) = y.coerceIn(60f * d, (h - 96f * d).coerceAtLeast(60f * d))
     }
 }

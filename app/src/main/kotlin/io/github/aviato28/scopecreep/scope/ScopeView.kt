@@ -53,7 +53,7 @@ private class StaticCache {
 @Composable
 fun ScopeView(scene: ScopeScene, theme: ScopeTheme, game: GameController, modifier: Modifier = Modifier) {
     val density = LocalDensity.current.density
-    val camera = rememberSaveable(scene, saver = Camera.saver(scene.bounds)) { Camera(scene.bounds) }
+    val camera = rememberSaveable(scene, saver = Camera.saver(scene.bounds, scene.panBounds)) { Camera(scene.bounds, scene.panBounds) }
     val renderer = remember(scene) { ScopeRenderer(scene, theme, density) }
     val overlay = remember(scene) { GameOverlay(density, theme) }
     renderer.setTheme(theme); overlay.setTheme(theme)

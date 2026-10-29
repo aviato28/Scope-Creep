@@ -53,6 +53,10 @@ class ScopeRenderer(private val scene: ScopeScene, private var theme: ScopeTheme
             c.drawPath(scene.runwayCenterPaths[i], dashPaint)
         }
 
+        // hand-off zones: dashed extended centrelines
+        dashPaint.color = (t.runwayMark and 0x00FFFFFF) or 0x99000000.toInt(); dashPaint.strokeWidth = maxOf(1f * d * inv, 1.2f)
+        c.drawPath(scene.approachPath, dashPaint)
+
         // hold-short bars (fixed pixel length)
         val hl = 9f * d * inv
         val hs = scene.holds

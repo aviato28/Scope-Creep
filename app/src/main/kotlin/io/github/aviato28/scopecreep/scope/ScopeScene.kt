@@ -21,6 +21,10 @@ class ScopeScene(val airport: Airport) {
     /** per runway end: x, y, outward dx, dy, with text */
     val rwyLabelXY: FloatArray; val rwyLabelText: Array<String>
     val bounds = FloatArray(4)
+    /** How far the camera centre may pan: out to the ends of the hand-off zones. */
+    val panBounds = FloatArray(4)
+    /** Dashed extended centrelines (final approach / hand-off zones) at both ends of every runway. */
+    val approachPath = Path()
     /** Typical (10th percentile) nearest-neighbour distance between stands, metres; drives stand-ref LOD. */
     val standSpacing: Float
 
@@ -34,6 +38,7 @@ class ScopeScene(val airport: Airport) {
         for (ap in a.aprons) { ap.polygon.forEachIndexed { i, q -> poly(apronPath, q, i == 0); grow(q[0].toFloat(), q[1].toFloat()) }; apronPath.close() }
         for (b in a.buildings) { b.polygon.forEachIndexed { i, q -> poly(buildingPath, q, i == 0); grow(q[0].toFloat(), q[1].toFloat()) }; buildingPath.close() }
 
+        var pxMin = Float.MAX_VALUE; var pxMax = -Float.MAX_VALUE; var pyMin = Float.MAX_VALUE; var pyMax = -Float.MAX_VALUE
         val rp = ArrayList<Path>(); val rc = ArrayList<Path>(); val rw = ArrayList<Float>()
         val lx = ArrayList<Float>(); val lt = ArrayList<String>()
         for (r in a.runways) {
@@ -45,7 +50,11 @@ class ScopeScene(val airport: Airport) {
             rp += Path().apply { moveTo(x0 + nx, y0 + ny); lineTo(x1 + nx, y1 + ny); lineTo(x1 - nx, y1 - ny); lineTo(x0 - nx, y0 - ny); close() }
             rc += Path().apply { cl.forEachIndexed { i, q -> poly(this, q, i == 0) } }
             rw += r.widthM.toFloat()
-            grow(x0 - 60 * ux, y0 - 60 * uy); grow(x1 + 60 * ux, y1 + 60 * uy)
+            grow(x0 - APPROACH_FIT_M * ux, y0 - APPROACH_FIT_M * uy); grow(x1 + APPROACH_FIT_M * ux, y1 + APPROACH_FIT_M * uy)
+            approachPath.moveTo(x0, y0); approachPath.lineTo(x0 - HANDOFF_M * ux, y0 - HANDOFF_M * uy)
+            approachPath.moveTo(x1, y1); approachPath.lineTo(x1 + HANDOFF_M * ux, y1 + HANDOFF_M * uy)
+            pxMin = minOf(pxMin, x0 - HANDOFF_M * ux, x1 + HANDOFF_M * ux); pxMax = maxOf(pxMax, x0 - HANDOFF_M * ux, x1 + HANDOFF_M * ux)
+            pyMin = minOf(pyMin, y0 - HANDOFF_M * uy, y1 + HANDOFF_M * uy); pyMax = maxOf(pyMax, y0 - HANDOFF_M * uy, y1 + HANDOFF_M * uy)
             // designators: first end sits at the start of the polyline when headings agree, else swap by heading
             val first = r.ends[0]; val second = r.ends[1]
             lx += listOf(x0, y0, -ux, -uy); lt += first.designator
@@ -120,7 +129,10 @@ class ScopeScene(val airport: Airport) {
         standSpacing = if (nn.isEmpty() || nn[0] == Float.MAX_VALUE) 40f else nn[(nn.size / 10)].coerceAtLeast(5f)
         val m = 150f
         bounds[0] = minX - m; bounds[1] = minY - m; bounds[2] = maxX + m; bounds[3] = maxY + m
+        panBounds[0] = minOf(bounds[0], pxMin); panBounds[1] = minOf(bounds[1], pyMin); panBounds[2] = maxOf(bounds[2], pxMax); panBounds[3] = maxOf(bounds[3], pyMax)
     }
+
+    private companion object { const val APPROACH_FIT_M = 700f; const val HANDOFF_M = 6500f }
 
     private fun unit(dx: Float, dy: Float): FloatArray { val l = hypot(dx, dy).coerceAtLeast(0.001f); return floatArrayOf(dx / l, dy / l) }
 

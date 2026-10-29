@@ -13,6 +13,9 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
+// data/airlines.json lives once at the repo root; it is bundled as a classpath resource here and as an asset in :app.
+sourceSets.main { resources.srcDir(rootProject.file("data")) }
+
 tasks.test {
     useJUnitPlatform()
     systemProperty("airports.dir", rootProject.file("airports").absolutePath)

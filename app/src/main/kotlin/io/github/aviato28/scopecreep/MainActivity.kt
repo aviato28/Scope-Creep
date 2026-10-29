@@ -52,6 +52,8 @@ import androidx.core.view.WindowInsetsControllerCompat
 import io.github.aviato28.scopecreep.scope.ScopeScene
 import io.github.aviato28.scopecreep.scope.ScopeView
 import io.github.aviato28.scopecreep.sim.airport.AirportLoader
+import io.github.aviato28.scopecreep.sim.Fleet
+import io.github.aviato28.scopecreep.sim.TrafficProfile
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
@@ -86,7 +88,14 @@ private fun ScopeApp() {
             ScopeScene(context.assets.open("airports/VOBL/airport.json").use { AirportLoader.load(it) })
         }
     }
-    val game = remember(scene) { scene?.let { GameController(it) } }
+    val game = remember(scene) {
+        scene?.let { sc ->
+            // airline telephony table (data/airlines.json) and this airport's traffic mix; fall back to the bundled defaults
+            val fleet = runCatching { context.assets.open("data/airlines.json").use { Fleet.parse(it) } }.getOrDefault(Fleet.default)
+            val profile = runCatching { context.assets.open("airports/${sc.airport.meta.icao}/traffic.json").use { TrafficProfile.parse(it) } }.getOrDefault(TrafficProfile.generic)
+            GameController(sc, fleet = fleet, profile = profile)
+        }
+    }
     LaunchedEffect(game) { if (game != null) while (true) withFrameNanos { game.frame(it) } }
     val bg = Color(theme.bg)
     val updater = remember { io.github.aviato28.scopecreep.update.UpdateManager.get(context) }
@@ -106,6 +115,7 @@ private fun ScopeApp() {
                     RadioLog(game, theme, Modifier.align(Alignment.TopStart).padding(6.dp))
                     PreviewBanner(game, theme, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
                     ActionBar(game, theme, Modifier.align(Alignment.BottomCenter))
+                    RunwaySheet(game, theme, Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp))
                 }
                 if (scene?.airport?.meta?.status != "approved" && scene != null) {
                     BasicText(
@@ -146,6 +156,20 @@ private fun StatusBar(scene: ScopeScene?, game: GameController?, theme: ScopeThe
                 Modifier.border(1.dp, Color(theme.selected)).clickable(onClick = onInfo).padding(horizontal = 6.dp, vertical = 2.dp),
                 style = st.copy(Color(theme.selected), 10.sp, fontWeight = FontWeight.Bold),
             )
+            if (game != null) {
+                game.rev; game.secRev
+                val sim = game.sim
+                BasicText("WIND ${sim.windText}", style = st)
+                Column(
+                    Modifier.size(width = 92.dp, height = 48.dp).clickable { game.toggleRwySheet() },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                ) {
+                    BasicText("RWY", style = st.copy(Color(theme.dim), 8.sp))
+                    BasicText("${sim.runwayConfig.dep}/${sim.runwayConfig.arr}".let { if (sim.runwayConfig.mixed) sim.runwayConfig.dep else it },
+                        Modifier.border(if (game.rwySheet) 2.dp else 1.dp, Color(if (game.rwySheet) theme.selected else theme.text)).padding(horizontal = 6.dp, vertical = 1.dp),
+                        style = st.copy(Color(if (game.rwySheet) theme.selected else theme.text), 12.sp, fontWeight = FontWeight.Bold))
+                }
+            }
             BasicText(clock, style = st)
             if (game != null) {
                 val sp = game.speed
