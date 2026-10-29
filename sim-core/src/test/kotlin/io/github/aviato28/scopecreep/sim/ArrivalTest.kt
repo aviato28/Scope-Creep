@@ -177,19 +177,25 @@ class ArrivalTest {
         assertTrue(checked >= 1, "no seed produced a flip")
     }
 
-    private fun soak(arr: String): Simulation {
+    private fun soak(arr: String, breakHeadOns: Boolean = true): Simulation {
         val sim = Simulation(vobl, 21, SimConfig(departureRunway = "27R", arrivalRunway = arr, windStartDirDeg = 270.0, windStartKt = 8.0, windDrift = false,
             spawnIntervalAt0 = 60.0, spawnIntervalAt1 = 60.0, arrivalIntervalAt0 = 100.0, arrivalIntervalAt1 = 100.0))
-        var t = 0.0
+        var t = 0.0; val tried = HashMap<Int, Double>()
         while (t < 3000.0) {
             sim.step(); t += 0.1
             for (a in sim.aircraft.toList()) when (a.state) {
                 AcState.REQUEST_PUSH -> sim.submit(PushbackApproved(a.id))
-                AcState.REQUEST_TAXI -> sim.submit(Taxi(a.id, sim.destinations.firstNotNullOf { d -> sim.suggestRoutes(a, d).firstOrNull() }))
+                AcState.REQUEST_TAXI -> { val r = sim.destinations.firstNotNullOf { d -> sim.suggestRoutes(a, d).firstOrNull() }; sim.submit(if (r.needsEscort) FollowMeTaxi(a.id, r) else Taxi(a.id, r)) }
                 AcState.HOLDING_SHORT -> if (!sim.submit(LineUpAndWait(a.id))) sim.submit(ClearedForTakeoff(a.id))
                 AcState.LINED_UP -> sim.submit(ClearedForTakeoff(a.id))
                 AcState.FINAL -> if (!a.cleared && sim.canClearToLand(a)) sim.submit(ClearedToLand(a.id))
-                AcState.VACATED -> sim.submit(TaxiToStand(a.id, sim.suggestRoutes(a, sim.standOptions(a).first()).first()))
+                AcState.TAXIING -> if (breakHeadOns && !a.isArrival && a.conflictWith != 0 && a.speed < 0.2 && sim.time - a.conflictSince > 20.0 && (tried[a.id] ?: -99.0) < sim.time - 30.0) { tried[a.id] = sim.time
+                    // a scripted controller breaks a head-on by backing the departure out and sending it the other way round
+                    val rt = a.route; val d = a.destination
+                    if (rt != null && d != null) { val pr = (rt.edges.size downTo 1).firstNotNullOfOrNull { n -> sim.planAmend(a, d, avoid = rt.edges.take(n).toSet()) }
+                    pr?.let { sim.submit(AmendRoute(a.id, it)) } }
+                }
+                AcState.VACATED -> { val r = sim.suggestRoutes(a, sim.standOptions(a).first()).first(); sim.submit(if (r.needsEscort) FollowMeTaxi(a.id, r) else TaxiToStand(a.id, r)) }
                 else -> {}
             }
         }
@@ -197,7 +203,7 @@ class ArrivalTest {
     }
 
     @Test fun `mixed mode on one runway, departures and arrivals share it without an incursion`() {
-        val sim = soak("27R")
+        val sim = soak("27R", breakHeadOns = false)
         val landed = sim.events.count { it is LandedEvent }; val dep = sim.events.count { it is DepartedEvent }
         println("mixed 27R: landed $landed departed $dep go-arounds ${sim.goArounds}")
         assertTrue(landed >= 8 && dep >= 8)
@@ -208,7 +214,7 @@ class ArrivalTest {
         val sim = soak("27L")
         val landed = sim.events.count { it is LandedEvent }; val dep = sim.events.count { it is DepartedEvent }
         println("split 27s: landed $landed departed $dep parked ${sim.events.count { it is ArrivalParkedEvent }} go-arounds ${sim.goArounds}")
-        assertTrue(landed >= 15 && dep >= 15 && sim.events.count { it is ArrivalParkedEvent } >= 10)
+        assertTrue(landed >= 15 && dep >= 15 && sim.events.count { it is ArrivalParkedEvent } >= 10)  // soak throughput shifts a little with each graph change (escort-only L3/L2 links need FOLLOW ME)
         assertTrue(sim.events.none { it is RunwayIncursionEvent })
     }
 }

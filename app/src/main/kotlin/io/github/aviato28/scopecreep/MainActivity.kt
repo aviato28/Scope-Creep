@@ -74,7 +74,10 @@ class MainActivity : ComponentActivity() {
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             hide(WindowInsetsCompat.Type.systemBars())
         }
-        setContent { ScopeApp() }
+        setContent {
+            ScopeApp()
+            io.github.aviato28.scopecreep.crash.CrashReportPrompt()
+        }
     }
 }
 

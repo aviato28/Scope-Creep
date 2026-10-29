@@ -1,0 +1,4 @@
+crossing  G (e-osm-395510324-7) x P (e-osm-837936018-2) at 1903,-741
+crossing  G (e-osm-395510324-8) x Q (e-osm-870716348-2) at 1993,-741
+crossing  P (e-osm-837936018-10) x D (e-osm-837936041-1) at 1911,349
+skipped   A6 (e-osm-838283542-1) x A7 (e-osm-838283543-1) at -246,905: crossing within 45 m of a runway centreline

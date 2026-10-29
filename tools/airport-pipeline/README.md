@@ -23,7 +23,7 @@ ends agree (`refSource: "propagated"`); holds from `holding_position` nodes with
 stands from `parking_position`/`gate` nodes with a lead-in edge to the nearest taxiway within 120 m (otherwise reported);
 aprons (not disused) and terminals/hangars as polygons; runway centreline segments in the graph (`kind: runway`).
 
-Overrides: `<out>/overrides.json` applied last (format in `docs/airport-data.md`).
+Auto-join (dead ends within 3 m, crossings without a node) is logged in `review/autojoin.txt`. Overrides: `<out>/overrides.json` applied last (format, `connect` and `escortOnly` in `docs/airport-data.md`); `review.py` also writes `review/junctions.md|png` (J#n near-misses).
 
 Review sheet: `NODE_PATH=$(npm root -g) python3 -I tools/airport-pipeline/review.py --airport airports/VOBL --tmp SCRATCH_DIR` (needs node + Playwright for the PNGs).
 

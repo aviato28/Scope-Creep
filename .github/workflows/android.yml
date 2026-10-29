@@ -16,6 +16,10 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
       - name: Test and build
         run: ./gradlew :sim-core:test :app:assembleDirectDebug :app:assembleDirectPreview
+      # Screenshot tests (Roborazzi on Robolectric, no emulator). Baselines: app/src/test/screenshots/;
+      # re-record locally with ./gradlew :app:recordRoborazziDirectDebug
+      - name: Verify screenshots
+        run: ./gradlew :app:verifyRoborazziDirectDebug :app:testDirectDebugUnitTest
       - name: Lint (non-blocking)
         continue-on-error: true
         run: ./gradlew :app:lintDirectDebug
@@ -27,3 +31,19 @@ jobs:
         with:
           name: scope-creep-preview-apk
           path: app/build/outputs/apk/direct/preview/*.apk
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: app/src/test/screenshots/
+          if-no-files-found: ignore
+      - name: Screenshot diffs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-diffs
+          path: |
+            app/build/outputs/roborazzi/
+            app/build/reports/roborazzi/
+          if-no-files-found: ignore

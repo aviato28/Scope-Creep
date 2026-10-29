@@ -1,6 +1,6 @@
 {
   "_source": "Checked against AAI eAIP VOBL charts (AD 2 VOBL 1-101 Aerodrome Chart and 1-301 Aircraft Parking/Docking Chart, both 27 NOV 2025; eAIP package AIRAC effective 29 OCT 2026)",
-  "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py; refs set here get refSource \"override\". Sections: holds {id:{ref|delete}}, edges {id:{ref,widthM}}, ways {osmWayId:{ref}}, stands {id:{ref}}, meta {elevationM,magneticVariationDeg,name}. ways/edges also accept {\"closed\": true} (drawn hatched, never routed).",
+  "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py; refs set here get refSource \"override\". Sections: holds {id:{ref|delete}}, edges {id:{ref,widthM}}, ways {osmWayId:{ref}}, stands {id:{ref}}, meta {elevationM,magneticVariationDeg,name}, connect [{from,to,escortOnly,_note}] (node or edge ids; adds a link edge, splitting an edge when needed). Edges also accept escortOnly (only behind a follow-me). ways/edges also accept {\"closed\": true} (drawn hatched, never routed).",
   "schemaVersion": 1,
   "meta": {},
   "ways": {
@@ -53,7 +53,20 @@
       "closed": true
     }
   },
-  "edges": {},
+  "edges": {
+    "e-osm-460265873-1": {
+      "escortOnly": true,
+      "_note": "maintainer: VOBL aircraft on taxilane L3 reach L2 or L1 only behind a follow-me"
+    },
+    "e-osm-460265873-4.20": {
+      "escortOnly": true,
+      "_note": "maintainer: VOBL aircraft on taxilane L3 reach L2 or L1 only behind a follow-me"
+    },
+    "e-osm-870716346-1": {
+      "escortOnly": true,
+      "_note": "maintainer: VOBL aircraft on taxilane L3 reach L2 or L1 only behind a follow-me"
+    }
+  },
   "holds": {
     "h-osm-14300164156": {
       "ref": "A2"
@@ -198,5 +211,19 @@
     "s-osm-11083520393": {
       "ref": "V63"
     }
-  }
+  },
+  "connect": [
+    {
+      "from": "n-osm-7820812040",
+      "to": "e-osm-460265873-2.4",
+      "escortOnly": false,
+      "_note": "chart: TWY B2 fans out onto L1, L2 and L3 (Aircraft Parking/Docking Chart 1-301, Apron 2/3 junction); OSM had the L1/L2 fan only. Normal, not escort-only."
+    },
+    {
+      "from": "n-osm-4559446322",
+      "to": "e-osm-460265873-3",
+      "escortOnly": false,
+      "_note": "chart: TWY B4 fans out onto L1, L2 and L3 the same way (Apron 1/2 junction). Normal."
+    }
+  ]
 }

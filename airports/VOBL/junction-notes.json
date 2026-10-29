@@ -1,0 +1,11 @@
+{
+  "crossing~e-osm-838283542-1~e-osm-838283543-1": "chart: A7 (west) and A6 (east) are drawn as a non-crossing wedge from the runway; OSM has them crossing 30 m from the runway, so the ref labels or geometry may be swapped. Not joined: maintainer to decide.",
+  "near~n-43c6e7~e-osm-460265864-6": "chart: L1, L2 and L3 are parallel lanes about 23 m apart, joined at their ends and by the B2/B4 fans only; no mid-lane link is drawn. By design, not a missing link.",
+  "near~n-80756f~e-osm-1175618538-2": "chart: B2 reaches L3 directly (connect override, normal); the L2 lane stays separate from L3 (L3 to L2/L1 is escort-only).",
+  "near~n-8c1f15~e-osm-1175626020-4": "chart: the B2 fan to L1/L2 (unnamed OSM way) passes this point; L3 is reached by the connect override, not by this fan.",
+  "near~n-a46ae5~e-osm-460265864-2": "chart: L1, L2 and L3 are parallel lanes about 23 m apart, joined at their ends and by the B2/B4 fans only; no mid-lane link is drawn. By design, not a missing link.",
+  "near~n-osm-10924115006~e-osm-460265872-1.4": "chart: taxilane D leaves the east end of the lanes towards Apron 3; D is escort-only from L2 (override). chart: L1, L2 and L3 are parallel lanes about 23 m apart, joined at their ends and by the B2/B4 fans only; no mid-lane link is drawn. By design, not a missing link.",
+  "near~n-osm-10924175515~e-osm-460265873-2.3": "chart: L1, L2 and L3 are parallel lanes about 23 m apart, joined at their ends and by the B2/B4 fans only; no mid-lane link is drawn. By design, not a missing link.",
+  "near~n-osm-4559446317~e-osm-460265872-3.3": "chart: L1, L2 and L3 are parallel lanes about 23 m apart, joined at their ends and by the B2/B4 fans only; no mid-lane link is drawn. By design, not a missing link.",
+  "near~n-osm-4559446317~e-osm-460265873-2.9": "chart: L1, L2 and L3 are parallel lanes about 23 m apart, joined at their ends and by the B2/B4 fans only; no mid-lane link is drawn. By design, not a missing link."
+}

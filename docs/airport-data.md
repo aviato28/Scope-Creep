@@ -110,7 +110,7 @@ Edges (undirected unless `oneWay`):
 ```json
 { "id": "e-2c81d0", "from": "n-7f3a91", "to": "n-b04e22",
   "ref": "A", "kind": "taxiway", "widthM": 23,
-  "maxCode": "E", "oneWay": false }
+  "maxCode": "E", "oneWay": false, "escortOnly": false }
 ```
 
 `kind` is `taxiway`, `taxilane`, `rapidExit` or `runwayCrossing`. `ref` may be null (apron lanes, unnamed links), but see validation. `maxCode` is the largest ICAO code letter (A-F) allowed; wingspan limits may be added as `maxWingspanM`.
@@ -242,6 +242,16 @@ Failure reports are plain text, one issue per line with the stable ID, so an age
 
 `{"closed": true}` on an `edges` or `ways` entry marks edges `closed`: drawn hatched/dim, never routed. Edge ids win over `ways` (an OSM way id renames every edge of that way). Overridden values get `refSource: "override"`. A generated hold ref follows its connector when the connector is renamed, unless the hold is itself overridden. Unknown ids (removed by an OSM update) are reported as warnings in `review/unresolved.txt` and stderr, never dropped silently. `status` and `approved*` cannot be overridden. `tools/airport-pipeline/review.py` writes `review/review.svg|png`, `north-runway-holds.png` and `unnamed.md` (short ids H#n/W#n mapped to stable ids).
 
+#### Junction repair, `connect` and `escortOnly`
+
+Pipeline step 4 auto-joins what OSM leaves unconnected: a taxiway/taxilane dead end within 3 m (`JOIN_TOL`) of another taxi line is snapped to it, and two taxi ways that cross without a shared node get a junction node (the edges are split, ids become `<id>.1`, `<id>.2`; edge overrides on the old id apply to all pieces). Excluded: runways, bridges, tunnels, `layer` other than 0, `disused`/`abandoned` ways, ways or edges marked `closed` in the overrides, and crossings closer than 45 m to a runway centreline (they would leave no room for the hold; they are listed for review). Every join is logged in `review/autojoin.txt`.
+
+`review.py` then lists what is left as **J#n** in `review/junctions.md` and `review/junctions.png`: dead ends within 25 m of another taxi line, nodes within 25 m of a line they only reach by a long path (more than 120 m or 5 times the gap), and skipped crossings. The reviewer's chart comparison goes in `airports/<ICAO>/junction-notes.json` (key to note); entries without a note read "open".
+
+`connect` joins two things the data keeps apart, from the chart: `"connect": [{"from": "<node or edge id>", "to": "<node or edge id>", "escortOnly": false, "_note": "chart: ..."}]`. A node end links to the nearest point of an edge (splitting it unless within 2 m of an existing node); two edges link at their closest end. The link is an edge `e-conn-<hash>`; unknown ids are warnings.
+
+`escortOnly` (edge field, Boolean, default false, written only when true): the edge may be used only behind a follow-me vehicle, so normal routing avoids it. Set via `"edges": {"<edge id>": {"escortOnly": true}}` or on a `connect` entry. VOBL: aircraft on taxilane L3 reach L2 or L1 only behind a follow-me; the L3/L2/L1 link edges at the lane ends (`e-osm-460265873-1`, `e-osm-460265873-4.20`) and the L2-to-D link (`e-osm-870716346-1`) are escort-only, while TWY B2 and B4 reach L3 normally (two `connect` entries, chart-confirmed).
+
 Notes are the maintainer's own words, not quoted chart text.
 
 ## Loading in the game
@@ -261,3 +271,7 @@ Notes are the maintainer's own words, not quoted chart text.
 7. Magnetic variation: use a fixed per-airport value (suggested) versus a model.
 8. ODbL wording in NOTICE and the About screen; maintainer to confirm the share-alike reading.
 9. Which second airport to try, to test the pipeline's generality.
+
+## Screenshot tests
+
+Roborazzi on Robolectric (JVM, no emulator), `app/src/test/.../shots/ScreenshotTest.kt`: menu, briefing, scope (VOBL, fitted, seeded, 90 s advanced), About, Settings and summary at phone (873x393 dp) and tablet (1280x800 dp) in Phosphor, plus the scope in Modern Surface. Baselines in `app/src/test/screenshots/`. Re-record with `./gradlew :app:recordRoborazziDirectDebug`; CI runs `:app:verifyRoborazziDirectDebug` and uploads artifact `screenshots` (always) and `screenshot-diffs` (on failure). The status bar is private to MainActivity and is not in the scope shots. Locally, Robolectric fetches its android-all jar from Maven; if that is rate limited, put the jar in `~/.m2`.
