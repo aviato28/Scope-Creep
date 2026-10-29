@@ -15,6 +15,10 @@ Settled in Phase 0 conversation. Revisit only if you say so.
 | 10 | In-app updates | Must-have. "Check for updates" in Settings, plus an optional check at launch. Pulls signed APKs from GitHub Releases. Removed from the Play Store build flavour. |
 | 11 | Working mode | Opus plans and reviews; building is delegated to Sonnet/Haiku agents. Token-frugal throughout. |
 | 12 | Taxi input | **Tap-to-route; no drag in v1.** Tap aircraft, then tap a destination (runway hold point, stand, apron), then the game offers 1-3 suggested routes as chips (e.g. `C M A A1`) that you preview on the map and send with one tap. **BUILD** mode builds a custom route one junction at a time: after each tap, only the taxiways legal from that point are offered as chips (the maintainer's idea). Drag may come back later as a tablet option. |
+| 13 | Engine | **Kotlin + Jetpack Compose**, with a pure-Kotlin `sim-core` module (see `docs/tech.md`). Delegated to the lead; the maintainer's criteria are fluid, fun and working. |
+| 14 | VOBL runways | Confirmed by the maintainer: north runway 09L/27R, south runway 09R/27L. |
+| 15 | Tunables | Accepted as proposed: update check at most every 12 h; hold-short distances 60 / 90 / 107-120 m by code letter (tune in play). |
+| 16 | Tows and arrivals | Tugs never cross runways in v1. Arrivals get a VACATE VIA instruction. |
 | 8 | Fidelity | Airports must be detailed: the full real taxiway network, not a simplified one. Early mockups use placeholder geometry; the real layout comes from the pipeline. |
 
 ## Consequences
