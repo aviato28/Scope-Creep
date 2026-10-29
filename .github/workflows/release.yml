@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the v, e.g. 0.3.0 (append -beta.1 for a pre-release)'
+        required: true
 
 permissions:
   contents: write
@@ -17,6 +22,13 @@ jobs:
       KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve tag
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAG="v$INPUT_VERSION"; else TAG="$GITHUB_REF_NAME"; fi
+          case "$TAG" in *[!A-Za-z0-9.-]*) echo "::error::Bad version '$TAG'"; exit 1 ;; v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "::error::Bad version '$TAG'"; exit 1 ;; esac
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
       - name: Check signing secrets
         run: |
           missing=""
@@ -36,7 +48,7 @@ jobs:
           echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
       - name: Build
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           ./gradlew :sim-core:test :app:assembleDirectRelease \
             -PversionName="$VERSION" -PversionCode=$((GITHUB_RUN_NUMBER + 100))
@@ -50,8 +62,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           flags=""
-          case "$GITHUB_REF_NAME" in *-beta*) flags="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" $flags --title "Scope Creep $VERSION" --generate-notes \
+          case "$TAG" in *-beta*) flags="--prerelease" ;; esac
+          gh release create "$TAG" --target "$GITHUB_SHA" $flags --title "Scope Creep $VERSION" --generate-notes \
             "out/scope-creep-$VERSION.apk" out/checksums.txt
       - name: Remove keystore
         if: always()
