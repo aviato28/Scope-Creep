@@ -1,0 +1,17 @@
+e-osm-1076479193-1: entry connector ends 38 m from the centreline of 98623865, no room for a hold
+e-osm-1076479194-1: entry connector ends 38 m from the centreline of 98623865, no room for a hold
+e-osm-1076479194-1: taxiway edge without ref (OSM and propagation)
+e-osm-1076479197-1: taxiway edge without ref (OSM and propagation)
+e-osm-1076479201-1: taxiway edge without ref (OSM and propagation)
+e-osm-1183907114-1: taxiway edge without ref (OSM and propagation)
+e-osm-1183907116-1.1: taxiway edge without ref (OSM and propagation)
+e-osm-1183907116-1.2: taxiway edge without ref (OSM and propagation)
+e-osm-1327654695-1: taxiway edge without ref (OSM and propagation)
+e-osm-589395988-1: taxiway edge without ref (OSM and propagation)
+e-osm-979872057-1: taxiway edge without ref (OSM and propagation)
+e-osm-979872059-1: taxiway edge without ref (OSM and propagation)
+e-osm-979872061-1: taxiway edge without ref (OSM and propagation)
+e-osm-979872062-1: taxiway edge without ref (OSM and propagation)
+e-osm-979872063-1: taxiway edge without ref (OSM and propagation)
+e-osm-979872064-1: taxiway edge without ref (OSM and propagation)
+h-gen-e-osm-1327654693-1: entry connector without taxiway ref, hold ref null

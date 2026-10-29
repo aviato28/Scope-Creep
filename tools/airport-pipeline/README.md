@@ -27,4 +27,6 @@ Auto-join (dead ends within 3 m, crossings without a node) is logged in `review/
 
 Review sheet: `NODE_PATH=$(npm root -g) python3 -I tools/airport-pipeline/review.py --airport airports/VOBL --tmp SCRATCH_DIR` (needs node + Playwright for the PNGs).
 
+Way-shaped stands, stand attributes, runway `backtrackAllowed` and `turnPads`: see `docs/airport-data.md`. VOML (single runway): `--origin 12.9544,74.8863 --mag-var -1.9 --elevation 97`.
+
 Not yet done: runwayCrossing/rapidExit classification, hold generation for junctions without OSM holds.

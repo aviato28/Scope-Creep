@@ -254,6 +254,19 @@ Pipeline step 4 auto-joins what OSM leaves unconnected: a taxiway/taxilane dead 
 
 Notes are the maintainer's own words, not quoted chart text.
 
+#### Stands drawn as ways, stand attributes (VOML)
+
+`parking_position`/`gate` may be OSM **ways** (a lead-in line) instead of nodes. The stand point is the end of the line farther from the taxi lines (a tie keeps the last node) and the stand id is that OSM node (`s-osm-<node>`). The `stands` override also takes `type` (`contact`/`remote`), `maxCode` and `terminal` (hand facts, e.g. from the parking chart); they are written to the stand as given.
+
+#### Runway backtrack and turn pads (VOML)
+
+Single-runway airports without a full parallel taxiway, or with entries part-way along the runway, need **backtracking**: taxi along the runway against the landing/take-off direction to the end (or an entry), turn 180 degrees on a turn pad and line up. The maintainer confirmed VOML needs it. Data model, both set from `overrides.json`:
+
+- `"runways": {"<osm way id>": {"backtrackAllowed": true}}` sets `backtrackAllowed: true` on the runway object and on every `kind: runway` graph edge of that way. A router must treat those edges as walkable in either direction only for an aircraft with a backtrack instruction (they are otherwise not part of normal taxi routing).
+- `"turnPads": [{"runwayWay": "<osm way id>", "end": "24", "node": "<graph node id>", "confirmed": true}]` becomes the top-level `turnPads` array: `{id: "tp-<end>", runway, end, node, headingTrue, confirmed}`. `node` is the runway-centreline node where the aircraft turns round (the end of the centreline chain); `confirmed: false` means the AIP does not document a pad there and the maintainer must check.
+
+Absent overrides produce neither field (VOBL output is unchanged).
+
 ## Loading in the game
 
 - The app bundles only `approved` airports in release builds. Debug builds may show `draft` ones behind a dev flag (decisions, consequences).

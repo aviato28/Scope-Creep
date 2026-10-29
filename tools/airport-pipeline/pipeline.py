@@ -161,6 +161,9 @@ def edge_way(eid):
     return m.group(1) if m else None
 
 
+STAND_ATTR = {}   # stand node id -> {type, maxCode, terminal} from overrides (hand facts, e.g. chart suitability)
+
+
 def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, used):
     """Last pipeline step. Ids are the stable ids; unknown ids only warn (OSM updates can remove them).
     Precedence for edges: edge id over way id. Returns the number of applied overrides. Mutates its arguments."""
@@ -207,6 +210,8 @@ def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, 
         if "ref" in d:
             stands_raw[:] = [(a_, b_, d["ref"], c_) if a_ == i else (a_, b_, r_, c_) for a_, b_, r_, c_ in stands_raw]
             marks.add((i, "override")); n += 1
+        for k_ in ("type", "maxCode", "terminal"):
+            if k_ in d: STAND_ATTR.setdefault(i, {})[k_] = d[k_]; n += 1
     for k, v in sorted(ov.get("meta", {}).items()):
         if k in META_KEYS: meta_ov[META_KEYS[k]] = v; n += 1
         else: orphan.append("meta/" + k + " (not overridable)")
@@ -451,6 +456,18 @@ def main():
                 r = t.get("ref") or t.get("name")
                 r = re.sub(r"^(bay|stand|gate)\s+", "", r.strip(), flags=re.I) if r else None
                 stands_raw.append((i, p, r or None, t.get("aeroway")))
+    # parking_position drawn as a way (lead-in line, e.g. VOML): the stand point is the end farther from the taxi
+    # lines (the stop end); a tie keeps the last node. Stand id is that OSM node id.
+    taxi_pts = [P(n) for w_, (nd_, t_) in ways.items() if t_.get("aeroway") in ("taxiway", "taxilane") for n in nd_ if n in nodes]
+    have = {x[0] for x in stands_raw}
+    for w_, (nd_, t_) in sorted(ways.items(), key=lambda kv: int(kv[0])):
+        if t_.get("aeroway") not in ("parking_position", "gate") or len(nd_) < 2 or not all(n in nodes for n in (nd_[0], nd_[-1])): continue
+        dist = lambda n: min((math.hypot(P(n)[0] - q[0], P(n)[1] - q[1]) for q in taxi_pts), default=0.0)
+        i = nd_[0] if dist(nd_[0]) > dist(nd_[-1]) + 1.0 else nd_[-1]
+        if i in have or math.hypot(*P(i)) > a.radius: continue
+        r = t_.get("ref") or t_.get("name")
+        r = re.sub(r"^(bay|stand|gate)\s+", "", r.strip(), flags=re.I) if r else None
+        stands_raw.append((i, P(i), r or None, t_.get("aeroway"))); have.add(i)
     deg = {}
     for e in edges:
         for n in (e["from"], e["to"]):
@@ -613,7 +630,7 @@ def main():
         holds.append({"id": "h-osm-" + h, "node": n, "runway": "rwy-osm-" + w, "ref": None, "refGenerated": False,
                       "category": "CAT1", "type": "intermediate"})
     # ---- overrides (last step before output; see apply_overrides)
-    ov_warn, ov_n, meta_ov = [], 0, {}
+    ov_warn, ov_n, meta_ov, ov = [], 0, {}, {}
     ov_marks = set()
     ov_path = a.overrides or os.path.join(a.out, "overrides.json")
     if os.path.exists(ov_path):
@@ -648,7 +665,8 @@ def main():
         ends = []
         for d, p, hdg in ((designators[0], poly[0], brg), (designators[1], poly[-1], (brg + 180) % 360)):
             ends.append({"designator": d, "threshold": {"x": p[0], "y": p[1]}, "displacedM": 0, "trueHeadingDeg": round(hdg, 1)})
-        runways.append({"id": "rwy-osm-" + w, "ends": ends, "widthM": width, "lengthM": round(plen(poly), 1),
+        rw_ov = ov.get("runways", {}).get(w, {})
+        runways.append({**({"backtrackAllowed": True} if rw_ov.get("backtrackAllowed") else {}), "id": "rwy-osm-" + w, "ends": ends, "widthM": width, "lengthM": round(plen(poly), 1),
                         "protectedArea": {"halfWidthM": 75, "endExtensionM": 60},
                         "centerline": [list(p) for p in poly]})
 
@@ -660,6 +678,7 @@ def main():
         stands.append({"id": "s-osm-" + i, "ref": r, **({"refSource": "override"} if i in ov_stands else {}), "node": stand_nodes.get(i), "heading": None, "maxCode": None,
                        "apron": ap_id, "terminal": None, "type": "contact" if ae == "gate" else None, "x": p[0], "y": p[1],
                        "leadIn": i not in lead_missing})
+        stands[-1].update(STAND_ATTR.get(i, {}))
 
     # ---- output assembly
     used_nodes = {e["from"] for e in edges} | {e["to"] for e in edges}
@@ -671,6 +690,7 @@ def main():
         if e["refSource"]: o["refSource"] = e["refSource"]
         if e.get("closed"): o["closed"] = True
         if e.get("escortOnly"): o["escortOnly"] = True
+        if e["kind"] == "runway" and ov.get("runways", {}).get(edge_way(e["id"]), {}).get("backtrackAllowed"): o["backtrackAllowed"] = True
         if len(e["poly"]) > 2: o["shape"] = [[round(x, 1), round(y, 1)] for x, y in e["poly"][1:-1]]
         gedges.append(o)
     for h in holds:
@@ -687,6 +707,17 @@ def main():
            "aprons": sorted(aprons, key=lambda x: x["id"]), "buildings": sorted(blds, key=lambda x: x["id"]), "labels": []}
 
     for k, v in meta_ov.items(): doc["meta"][k] = v
+    # turn pads / runway-end turning areas (overrides `turnPads`): only written when the overrides list them
+    tps = []
+    for t_ in ov.get("turnPads", []):
+        rid = "rwy-osm-" + t_.get("runwayWay", "")
+        rw = next((r for r in runways if r["id"] == rid), None)
+        end = next((x for x in rw["ends"] if x["designator"] == t_.get("end")), None) if rw else None
+        if not end or t_.get("node") not in {n["id"] for n in gnodes}:
+            ov_warn.append("turnPads: unknown runway/end/node " + json.dumps([t_.get("runwayWay"), t_.get("end"), t_.get("node")])); continue
+        tps.append({"id": "tp-" + t_["end"], "runway": rid, "end": t_["end"], "node": t_["node"],
+                    "headingTrue": end["trueHeadingDeg"], "confirmed": bool(t_.get("confirmed"))})
+    if tps: doc["turnPads"] = sorted(tps, key=lambda x: x["id"])
     # ---- validation / unresolved
     errs, unres = [], []
     ids = {n["id"] for n in gnodes}
