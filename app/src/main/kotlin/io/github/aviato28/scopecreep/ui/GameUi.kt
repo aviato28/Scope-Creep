@@ -1,6 +1,16 @@
 package io.github.aviato28.scopecreep.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.aviato28.scopecreep.game.Bay
 import io.github.aviato28.scopecreep.game.GameController
 import io.github.aviato28.scopecreep.game.Mode
 import io.github.aviato28.scopecreep.sim.AcState
@@ -72,37 +83,29 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                     Chip(t, "X") { g.back() }
                 }
                 Mode.EXIT -> {
-                    BasicText("VACATE VIA", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
+                    BasicText(if (a.state == AcState.FINAL) "CLEARED. VACATE VIA" else "VACATE VIA", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
                     if (g.exitList.isEmpty()) BasicText("NO EXIT AHEAD", style = TextStyle(Color(t.warn), 12.sp, fontFamily = Mono))
-                    g.exitList.forEachIndexed { i, e -> Chip(t, e.label, "EXIT", accent = true) { g.chooseExit(i) } }
-                    Chip(t, "X") { g.back() }
+                    val chosen = g.chosenExitId()
+                    for (e in g.exitList) {
+                        val on = e.hold.id == chosen
+                        Chip(t, e.label, if (on) (if (a.exitPick != null) "CHOSEN" else "AUTO") else if (e.end) "LAST RESORT" else "%.1f km".format(e.sOnRunway / 1000.0), hot = on, accent = !on) { g.chooseExit(e) }
+                    }
+                    Chip(t, if (a.state == AcState.FINAL) "DONE" else "X") { g.back() }
                 }
                 Mode.DEST -> {
-                    BasicText(if (a.isArrival) "TAXI TO STAND" else "TAXI TO", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
+                    BasicText(if (a.isArrival) "TAP A STAND" else "TAP A DESTINATION", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
                     if (g.destList.isEmpty()) BasicText(if (a.isArrival) "NO STAND FREE" else "NO HOLD AHEAD", style = TextStyle(Color(t.departure), 12.sp, fontFamily = Mono))
                     g.destList.forEachIndexed { i, d ->
                         if (d.stand) Chip(t, "STAND ${d.label}", if (a.standDest?.node == d.node) "ASSIGNED" else "FREE", accent = true) { g.chooseDest(d) }
                         else Chip(t, "${d.runway} - ${d.label}", if (i == 0 && d.runway == g.sim.runwayConfig.dep) "DEP RWY" else "OTHER RWY", accent = true) { g.chooseDest(d) }
                     }
-                    Chip(t, "X") { g.back() }
+                    Chip(t, "CANCEL") { g.back() }
                 }
-                Mode.ROUTES -> {
-                    g.routes.forEachIndexed { i, r ->
-                        Chip(t, r.chipText, "%.2f km%s".format(r.lengthM / 1000.0, if (r.fastest) " - FASTEST" else ""), hot = i == g.routeIdx) { g.tapRoute(i) }
-                    }
-                    if (g.routes.isEmpty()) BasicText("NO ROUTE", style = TextStyle(Color(t.departure), 12.sp, fontFamily = Mono))
-                    else Chip(t, "SEND", accent = true) { g.send() }
-                    if (g.routes.isNotEmpty()) Chip(t, "BUILD") { g.startBuild() }
-                    if (g.hasVia) Chip(t, "CLEAR VIA") { g.clearVias() }
-                    else BasicText("TAP A TAXIWAY TO ROUTE VIA IT", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
-                    Chip(t, "BACK") { g.back() }
-                }
-                Mode.BUILD -> {
-                    val b = g.build
-                    for (o in g.buildOptions) Chip(t, "${o.arrow} ${o.ref}", if (o.best) "TOWARDS DEST" else null, accent = true) { g.buildPick(o) }
-                    if (b != null && b.complete) Chip(t, "SEND", hot = true) { g.send() }
-                    Chip(t, "UNDO", b?.refs()?.joinToString(" ")?.takeIf { it.isNotEmpty() }) { g.undo() }
-                    Chip(t, "BACK") { g.back() }
+                Mode.PLAN -> {
+                    if (g.needsEscort) Chip(t, "FOLLOW ME", "ESCORT NEEDED", hot = true) { g.send() } else Chip(t, "SEND", accent = true, hot = true) { g.send() }
+                    Chip(t, "UNDO", if (g.canUndo) "LAST EDIT" else null) { g.undo() }
+                    Chip(t, "CANCEL") { g.back() }
+                    BasicText("Tap a taxiway to go via it. Tap the route to avoid a part.", Modifier.align(Alignment.CenterVertically).widthIn(max = 220.dp), style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
                 }
             }
         }
@@ -112,7 +115,11 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
 @Composable
 fun PreviewBanner(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     g.rev
-    val text = when (g.mode) { Mode.PUSH -> "PUSHBACK: PICK FACING"; Mode.EXIT -> "VACATE: PICK AN EXIT"; Mode.DEST -> if (g.amend) "AMEND ROUTE: PICK A DESTINATION" else "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
+    val text = when (g.mode) {
+        Mode.PUSH -> "PUSHBACK: PICK FACING"; Mode.EXIT -> "VACATE: PICK AN EXIT"
+        Mode.DEST -> g.previewText.ifEmpty { if (g.amend) "AMEND ROUTE: TAP A DESTINATION" else "TAP A DESTINATION: HOLD BAR, RUNWAY OR STAND" }
+        Mode.PLAN -> g.previewText; else -> ""
+    }
     if (text.isEmpty()) return
     BasicText(text, modifier.background(Color(t.panel)).border(1.dp, Color(t.selected)).padding(horizontal = 10.dp, vertical = 5.dp),
         style = TextStyle(Color(t.selected), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
@@ -133,44 +140,122 @@ fun RadioLog(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     }
 }
 
-private fun stateText(a: Aircraft) = when (a.state) {
-    AcState.AT_STAND -> "ST ${a.standRef}"; AcState.REQUEST_PUSH -> "REQUEST PUSH"; AcState.PUSHING -> "PUSHING"
-    AcState.REQUEST_TAXI -> "REQUEST TAXI"; AcState.TAXIING -> if (a.held) "HELD" else if (a.isArrival) "TAXI IN" else "TAXI"; AcState.HOLDING_SHORT -> "HOLD SHORT ${a.destination?.label ?: ""}"
-    AcState.LINED_UP -> "LINED UP"; AcState.TAKEOFF_ROLL -> "TAKEOFF ROLL"; AcState.AIRBORNE -> "AIRBORNE"
-    AcState.FINAL -> if (a.cleared) "CLEARED TO LAND" else "REQUEST LANDING"; AcState.ROLLOUT -> "ROLLOUT"
-    AcState.VACATING -> "VACATING ${a.exitLabel}"; AcState.VACATED -> "REQUEST TAXI IN"; AcState.GO_AROUND -> "GO AROUND"
+/** Strip state line, e.g. "REQ TAXI - ST 109". */
+private fun stateText(g: GameController, a: Aircraft): String = when (a.state) {
+    AcState.AT_STAND -> "AT ST ${a.standRef}"; AcState.REQUEST_PUSH -> "REQ PUSH - ST ${a.standRef}"; AcState.PUSHING -> "PUSHING - ST ${a.standRef}"
+    AcState.REQUEST_TAXI -> if (a.escort != null) "AWAIT FOLLOW-ME" else "REQ TAXI - ST ${a.standRef}"
+    AcState.TAXIING -> if (a.held) "HELD" else if (a.crossing) "CROSSING" else (if (a.escort != null) "FOLLOW-ME - " else if (a.isArrival) "TAXI IN - " else "TAXI ") + (a.route?.refs?.joinToString(" ") ?: "") + (a.destination?.let { " TO ${it.label}" } ?: "")
+    AcState.HOLDING_SHORT -> "HOLD SHORT ${a.destination?.label ?: ""}"
+    AcState.LINED_UP -> "LINED UP"; AcState.TAKEOFF_ROLL -> "ROLLING"; AcState.AIRBORNE -> "AIRBORNE"
+    AcState.FINAL -> if (a.cleared) "LANDING ${a.rwyEnd}" else "FINAL ${a.rwyEnd}"; AcState.ROLLOUT -> "ROLLOUT ${a.rwyEnd}"
+    AcState.VACATING -> "VACATING ${a.exitLabel}"; AcState.VACATED -> "REQ TAXI IN"; AcState.GO_AROUND -> "GO AROUND"
     AcState.HOLDING_XING -> "HOLD SHORT XING"
 }
 
-/** Wide screens: docked strip bay. Phones: thin rail, top 4 plus a count. Strips are ordered by urgency; tap selects. */
+private fun mmss(sec: Int) = "%d:%02d".format(sec / 60, sec % 60)
+
+@Composable
+private fun ReqBadge(t: ScopeTheme) {
+    val a by rememberInfiniteTransition(label = "req").animateFloat(0.35f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "reqA")
+    BasicText("REQ", Modifier.background(Color(t.departure).copy(alpha = a)).padding(horizontal = 4.dp, vertical = 1.dp), style = TextStyle(Color(t.bg), 9.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+}
+
+/** One flight strip: callsign (ICAO), type, state, waiting time, a pulsing REQ badge when the pilot waits for the controller; selected = cyan outline. */
+@Composable
+private fun StripCard(g: GameController, t: ScopeTheme, a: Aircraft, compact: Boolean = false) {
+    val sel = a.id == g.selectedId; val conflict = a.conflictWith != 0; val req = GameController.needsController(a)
+    val line = Color(if (conflict) t.warn else if (sel) t.selected else if (req) t.departure else t.panelLine)
+    Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).border(if (sel || conflict) 2.dp else 1.dp, line)
+        .background(Color(t.bg)).clickable { g.select(a.id) }.padding(horizontal = 6.dp, vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BasicText(a.callsign, style = TextStyle(Color(if (conflict) t.warn else if (sel) t.selected else if (a.isArrival) t.arrival else t.departure), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+            BasicText(a.type.code, Modifier.weight(1f), style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+            if (req) ReqBadge(t)
+            val wait = if (a.waitSince >= 0) (g.sim.time - a.waitSince).toInt() else if (a.state == AcState.FINAL) g.sim.etaS(a).toInt().coerceAtLeast(0) else -1
+            if (wait >= 0) BasicText(mmss(wait), style = TextStyle(Color(if (req && wait >= 60) t.warn else t.dim), 10.sp, fontFamily = Mono))
+        }
+        BasicText(if (conflict) "CONFLICT" else stateText(g, a), maxLines = 1, style = TextStyle(Color(if (conflict) t.warn else t.text), 11.sp, fontFamily = Mono))
+    }
+}
+
+/** Bay header with its count; flashes when a new REQ arrives in the bay. */
+@Composable
+private fun BayHeader(g: GameController, t: ScopeTheme, bay: Bay, modifier: Modifier = Modifier) {
+    val i = bay.ordinal
+    val flash = remember { Animatable(0f) }
+    val n = g.bayFlash[i].intValue
+    LaunchedEffect(n) { if (n > 0) { flash.snapTo(1f); flash.animateTo(0f, tween(1100)) } }
+    val base = Color(t.accent).copy(alpha = 0.18f)
+    Row(modifier.fillMaxWidth().background(androidx.compose.ui.graphics.lerp(base, Color(t.departure), flash.value)).padding(horizontal = 6.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        BasicText(bay.title, Modifier.weight(1f), style = TextStyle(Color(t.accent), 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+        if (g.bayReq[i] > 0) { ReqBadge(t); Spacer(Modifier.width(6.dp)) }
+        BasicText("${g.bayLists[i].size}", style = TextStyle(Color(t.accent), 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+    }
+}
+
+/**
+ * The sectioned strip bay (decision 22). Wide screens: a docked panel with four sections, each scrolling if it overflows.
+ * Phones: a thin rail with the four bay names, counts and REQ dots; tap one to open [StripDrawer].
+ */
 @Composable
 fun StripPanel(g: GameController, t: ScopeTheme, wide: Boolean, modifier: Modifier = Modifier) {
     g.rev; g.secRev
-    val list = g.strips
-    val shown = if (wide) list.size else minOf(4, list.size)
-    Column(modifier.width(if (wide) 320.dp else 84.dp).fillMaxHeight().background(Color(t.panel)).border(1.dp, Color(t.panelLine)).padding(if (wide) 10.dp else 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        BasicText(if (wide) "FLIGHT STRIP BAY" else "STRIPS", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
-        for (k in 0 until shown) {
-            val a = list[k]
-            val sel = a.id == g.selectedId
-            val conflict = a.conflictWith != 0
-            val line = Color(if (conflict) t.warn else if (sel) t.selected else t.panelLine)
-            Column(Modifier.fillMaxWidth().heightIn(min = 48.dp).border(if (sel || conflict) 2.dp else 1.dp, line)
-                .background(Color(t.bg)).clickable { g.select(a.id) }.padding(horizontal = 6.dp, vertical = 4.dp)) {
-                BasicText(a.callsign, style = TextStyle(Color(if (conflict) t.warn else if (sel) t.selected else if (a.isArrival) t.arrival else t.departure), if (wide) 14.sp else 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
-                if (wide) {
-                    BasicText("${a.type.code} ${a.type.wake.code} - " + (if (a.isArrival) "ARR ${a.other} ST ${a.standDest?.label ?: a.standRef}" else "ST ${a.standRef}" + (if (a.other.isNotEmpty()) " TO ${a.other}" else "")), style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
-                    BasicText(a.route?.refs?.joinToString(" ")?.let { "ROUTE $it" } ?: if (a.isArrival && a.state == AcState.FINAL) "RWY ${a.rwyEnd}" else "NO ROUTE", style = TextStyle(Color(t.text), 11.sp, fontFamily = Mono))
-                }
-                BasicText(if (conflict) "CONFLICT" else stateText(a), style = TextStyle(Color(if (conflict) t.warn else t.text), if (wide) 11.sp else 8.sp, fontFamily = Mono))
-                if (a.waitSince >= 0) {
-                    val w = (g.sim.time - a.waitSince).toInt()
-                    BasicText("WAIT %d:%02d".format(w / 60, w % 60), style = TextStyle(Color(if (w >= 60) t.warn else t.dim), if (wide) 10.sp else 8.sp, fontFamily = Mono))
+    if (wide) {
+        Column(modifier.width(320.dp).fillMaxHeight().background(Color(t.panel)).border(1.dp, Color(t.panelLine)).padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            BasicText("STRIP BAY", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+            for (bay in Bay.entries) {
+                val list = g.bayLists[bay.ordinal]
+                Column(Modifier.fillMaxWidth().weight(list.size.coerceIn(1, 6).toFloat(), fill = false), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    BayHeader(g, t, bay)
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        for (a in list) StripCard(g, t, a)
+                    }
                 }
             }
         }
-        if (shown < list.size) BasicText("+${list.size - shown} MORE", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+    } else {
+        Column(modifier.width(84.dp).fillMaxHeight().background(Color(t.panel)).border(1.dp, Color(t.panelLine)).padding(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (bay in Bay.entries) {
+                val i = bay.ordinal; val open = g.openBay == bay
+                val flash = remember { Animatable(0f) }
+                val n = g.bayFlash[i].intValue
+                LaunchedEffect(n) { if (n > 0) { flash.snapTo(1f); flash.animateTo(0f, tween(1100)) } }
+                Column(Modifier.fillMaxWidth().weight(1f).heightIn(min = 48.dp)
+                    .background(androidx.compose.ui.graphics.lerp(Color(t.bg), Color(t.departure).copy(alpha = 0.5f), flash.value))
+                    .border(if (open) 2.dp else 1.dp, Color(if (open) t.selected else t.panelLine))
+                    .clickable { g.openBay = if (open) null else bay }.padding(horizontal = 5.dp, vertical = 3.dp), verticalArrangement = Arrangement.Center) {
+                    BasicText(bay.title, maxLines = 1, style = TextStyle(Color(t.accent), 9.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        BasicText("${g.bayLists[i].size}", style = TextStyle(Color(t.text), 15.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+                        if (g.bayReq[i] > 0) ReqDot(t)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReqDot(t: ScopeTheme) {
+    val a by rememberInfiniteTransition(label = "dot").animateFloat(0.3f, 1f, infiniteRepeatable(tween(650), RepeatMode.Reverse), label = "dotA")
+    Box(Modifier.size(10.dp).background(Color(t.departure).copy(alpha = a), CircleShape))
+}
+
+/** Phone: the open bay's strips as a drawer over the map (tap a strip to select it and close). */
+@Composable
+fun StripDrawer(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
+    g.rev; g.secRev
+    val bay = g.openBay ?: return
+    val list = g.bayLists[bay.ordinal]
+    Column(modifier.width(260.dp).heightIn(max = 300.dp).background(Color(t.panel)).border(1.dp, Color(t.selected)).padding(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { BayHeader(g, t, bay) }
+            Box(Modifier.size(44.dp).clickable { g.openBay = null }, contentAlignment = Alignment.Center) { BasicText("X", style = TextStyle(Color(t.text), 14.sp, fontFamily = Mono, fontWeight = FontWeight.Bold)) }
+        }
+        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (list.isEmpty()) BasicText("NO AIRCRAFT", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+            for (a in list) StripCard(g, t, a)
+        }
     }
 }
 

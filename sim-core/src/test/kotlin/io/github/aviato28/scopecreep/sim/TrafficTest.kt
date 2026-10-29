@@ -239,8 +239,7 @@ class TrafficTest {
                 if (a.state == AcState.REQUEST_PUSH) { val o = sim.pushOptions(a).first { if (a.standRef == "2") it.label == "WEST" else true }; sim.submit(PushbackApproved(a.id, o.edge)) }
                 if (a.state == AcState.REQUEST_TAXI) {
                     val d = sim.destinations.first { it.ref == "HM" }
-                    val rs = sim.suggestRoutes(a, d)
-                    val r = if (a.standRef == "1") rs.firstOrNull { "B" in it.refs } ?: return sim to -1.0 else rs.first()
+                    val r = if (a.standRef == "1") sim.planRoute(a, d, vias = listOf(sim.graph.edges.first { "B" in it.refs }.idx))?.takeIf { "B" in it.refs } ?: return sim to -1.0 else sim.planRoute(a, d)!!
                     sim.submit(Taxi(a.id, r))
                     if (a.standRef == "1" && seen.add(a.id)) sim.submit(HoldPosition(a.id)).also { a.timer = delayS }
                 }

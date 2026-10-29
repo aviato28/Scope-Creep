@@ -59,6 +59,8 @@ data class GraphEdge(
     val shape: List<List<Double>> = emptyList(),
     /** Closed taxiway (maintainer override): drawn hatched and dim, never routed. */
     val closed: Boolean = false,
+    /** Usable only behind a follow-me vehicle (decision 21 follow-up): normal routing never uses it. */
+    val escortOnly: Boolean = false,
 )
 
 @Serializable data class Graph(val nodes: List<GraphNode>, val edges: List<GraphEdge>)

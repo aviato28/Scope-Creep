@@ -142,6 +142,7 @@ private fun ScopeApp() {
                         HintBanner(g, theme, Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp))
                         ActionBar(g, theme, Modifier.align(Alignment.BottomCenter))
                         RunwaySheet(g, theme, Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp))
+                        if (!wide) StripDrawer(g, theme, Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 6.dp))
                         if (sc.airport.meta.status != "approved") {
                             BasicText(
                                 "DRAFT LAYOUT",

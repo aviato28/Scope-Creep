@@ -30,22 +30,56 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
     fun draw(c: Canvas, cam: Camera, g: GameController) {
         val z = cam.zoom; val w = cam.viewW; val h = cam.viewH; val d = density; val t = theme
         val inv = 1f / z
-        // ---- world space: route previews
+        // ---- world space: other active routes (faint, dashed), the selected aircraft's remaining route, the plan
         c.save(); c.translate(cam.ax, cam.ay); c.scale(z, -z); c.translate(-cam.cx, -cam.cy)
-        if (g.hasDim1) { dash.color = t.routeDim; dash.strokeWidth = 3f * d * inv; c.drawPath(g.dimPath1, dash) }
-        if (g.hasDim2) { dash.color = t.routeDim; dash.strokeWidth = 3f * d * inv; c.drawPath(g.dimPath2, dash) }
+        for (i in 0 until g.otherCount) { dash.color = t.routeDim; dash.strokeWidth = 2.5f * d * inv; c.drawPath(g.otherPaths[i], dash) }
+        val sa = g.selected
+        if (sa != null && g.mode != Mode.PLAN && showsRoute(sa)) {
+            GameController.fillRemaining(remPath, sa.path, sa.s)
+            line.color = (t.selected and 0x00FFFFFF) or 0xB0000000.toInt(); line.strokeWidth = 3f * d * inv; c.drawPath(remPath, line)
+        }
+        if (g.hasGhost && g.timeSec < g.ghostUntil) { dash.color = (t.selected and 0x00FFFFFF) or 0x70000000; dash.strokeWidth = 4f * d * inv; c.drawPath(g.ghostPath, dash) }
+        if (g.hasAvoid) { dash.color = t.warn; dash.strokeWidth = 5f * d * inv; c.drawPath(g.avoidPath, dash) }
         if (g.hasVia) { dash.color = t.departure; dash.strokeWidth = 5f * d * inv; c.drawPath(g.viaPath, dash) }
-        if (g.hasSel) { line.color = t.selected; line.strokeWidth = 4f * d * inv; c.drawPath(g.selPath, line) }
-        if (g.hasBuild) { line.color = t.selected; line.strokeWidth = 4f * d * inv; c.drawPath(g.buildPath, line) }
+        if (g.hasSel && g.mode == Mode.PLAN) { line.color = t.selected; line.strokeWidth = 4.5f * d * inv; c.drawPath(g.selPath, line) }
         c.restore()
+
+        // ---- screen space: taxiway tags on the planned route, via tags, avoid crosses
+        if (g.mode == Mode.PLAN) {
+            txt.textSize = 10f * d; txt.textAlign = Paint.Align.CENTER
+            for (i in 0 until g.refCount) {
+                val tx = (g.refX[i] - cam.cx) * z + cam.ax; val ty = cam.ay - (g.refY[i] - cam.cy) * z
+                if (tx < -40 || tx > w + 40 || ty < -40 || ty > h + 40) continue
+                val s = g.refText[i] ?: continue
+                val hw = txt.measureText(s) / 2 + 4f * d
+                bg.color = t.selected; c.drawRect(tx - hw, ty - 9f * d, tx + hw, ty + 9f * d, bg)
+                txt.color = t.bg; c.drawText(s, tx, ty + 3.6f * d, txt)
+            }
+            for (i in 0 until g.viaCount) {
+                val tx = (g.viaX[i] - cam.cx) * z + cam.ax; val ty = cam.ay - (g.viaY[i] - cam.cy) * z
+                bg.color = t.departure; c.drawRect(tx - 16f * d, ty + 10f * d, tx + 16f * d, ty + 26f * d, bg)
+                txt.color = t.bg; c.drawText("VIA", tx, ty + 22f * d, txt)
+            }
+            line.color = t.warn; line.strokeWidth = 3f * d
+            for (i in 0 until g.avoidCount) {
+                val tx = (g.avoidX[i] - cam.cx) * z + cam.ax; val ty = cam.ay - (g.avoidY[i] - cam.cy) * z
+                val r = 7f * d
+                bg.color = t.bg; c.drawCircle(tx, ty, r + 3f * d, bg)
+                c.drawLine(tx - r, ty - r, tx + r, ty + r, line); c.drawLine(tx - r, ty + r, tx + r, ty - r, line)
+            }
+            txt.textAlign = Paint.Align.LEFT
+        }
 
         // ---- hold pulses while choosing a destination
         val sim = g.sim
-        if (g.mode == Mode.DEST) {
+        if (g.mode == Mode.DEST || g.mode == Mode.PLAN) {
             val ph = (g.timeSec * 1.6f) % 1f
             line.color = t.departure; line.strokeWidth = 2f * d
             fill.color = (t.departure and 0x00FFFFFF) or 0x40000000
-            for (dst in g.destList) {
+            val plan = g.mode == Mode.PLAN
+            val nd = if (plan) 1 else g.destList.size
+            for (k in 0 until nd) {
+                val dst = (if (plan) g.dest else g.destList[k]) ?: continue
                 val px = (dst.x.toFloat() - cam.cx) * z + cam.ax; val py = cam.ay - (dst.y.toFloat() - cam.cy) * z
                 if (px < -40 || px > w + 40 || py < -40 || py > h + 40) continue
                 c.drawCircle(px, py, (9f + 9f * ph) * d, line)
@@ -53,6 +87,18 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
                 txt.color = t.departure; txt.textSize = 11f * d; txt.textAlign = Paint.Align.LEFT
                 c.drawText(dst.label, px + 12f * d, py - 10f * d, txt)
             }
+        }
+
+        // ---- follow-me vehicles: small yellow chevrons
+        val fms = sim.followMes
+        for (i in 0 until fms.size) {
+            val f = fms[i]
+            val fx = (f.interpX(sim.alpha).toFloat() - cam.cx) * z + cam.ax; val fy = cam.ay - (f.interpY(sim.alpha).toFloat() - cam.cy) * z
+            if (fx < -40 || fx > w + 40 || fy < -40 || fy > h + 40) continue
+            c.save(); c.translate(fx, fy); c.rotate(f.interpHeading(sim.alpha).toFloat()); c.scale(6f * d, 6f * d)
+            fill.color = FM_YELLOW; c.drawPath(chevron, fill); c.restore()
+            txt.color = FM_YELLOW; txt.textSize = 9.5f * d; txt.textAlign = Paint.Align.LEFT
+            c.drawText(f.name, fx + 9f * d, fy - 7f * d, txt)
         }
 
         // ---- aircraft (constant screen size); data blocks nudged apart in screen space
@@ -115,5 +161,12 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
         }
     }
 
-    private companion object { const val SLOTS = 6 }
+    private val remPath = Path()
+    private fun showsRoute(a: io.github.aviato28.scopecreep.sim.Aircraft) = when (a.state) {
+        AcState.TAXIING, AcState.VACATING, AcState.ROLLOUT, AcState.TAKEOFF_ROLL -> true
+        AcState.FINAL -> a.cleared
+        else -> false
+    }
+
+    private companion object { const val SLOTS = 6; const val FM_YELLOW = 0xFFFFD84A.toInt() }
 }

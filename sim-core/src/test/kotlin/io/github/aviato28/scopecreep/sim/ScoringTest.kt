@@ -72,20 +72,18 @@ class ScoringTest {
 }
 
 class TapRouteTest {
-    @Test fun `build options are ordered left to right and via routes pass through the tapped edge`() {
+    @Test fun `via and avoid edits re-form the route on VOBL`() {
         val a = io.github.aviato28.scopecreep.sim.airport.VoblAirportTest.load()
         val sim = Simulation(a, 3, SimConfig())
         val ac = run { repeat(3000) { sim.step() }; sim.aircraft.first { !it.isArrival } }
         val d = sim.destinations.first()
-        val b = sim.newBuild(ac, d)
-        val opts = b.options()
-        assertTrue(opts.isNotEmpty()); assertEquals(opts.sortedBy { it.turnDeg }.map { it.edge }, opts.map { it.edge })
-        assertEquals(1, opts.count { it.best })
-        val base = sim.suggestRoutes(ac, d).first()
+        val base = sim.planRoute(ac, d)!!
         if (base.edges.size > 2) {
             val via = base.edges[base.edges.size / 2]
-            val r = sim.suggestVia(ac, d, listOf(via)).firstOrNull()
+            val r = sim.planRoute(ac, d, vias = listOf(via))
             assertNotNull(r); assertTrue(via in r.edges)
+            val av = sim.planRoute(ac, d, avoid = setOf(via))
+            if (av != null) assertTrue(via !in av.edges)
         }
     }
 }

@@ -9,9 +9,17 @@ import kotlin.math.hypot
 
 /** A rapid or normal exit from the runway: a connector from a runway node out to a hold. */
 class RunwayExit(
+    /** What the chip and radio show: the taxiway ref, or "END" for a last-resort runway-end exit that is not a rapid exit. */
     val label: String, val hold: Destination, val runwayNode: Int, val sOnRunway: Double,
     val nodes: IntArray, val edges: IntArray, val geom: DoubleArray,
-)
+    /** Angle (deg, 0 = straight on) between the landing direction and the connector leaving the runway; rapid exits are angled forward. */
+    val angleDeg: Double = 90.0, val ret: Boolean = false, val ref: String = label,
+) {
+    /** The exit nearest the far end of the runway: always offered as a last resort. */
+    var end = false; internal set
+    /** Radio form: "H4", or "the end, H1". */
+    val say get() = if (end) "the end, $ref" else label
+}
 
 /** Everything the simulation needs about one runway end in use: centreline, departure holds, exits and the approach line. */
 class RwyCtx(val airport: Airport, val graph: TaxiGraph, val config: SimConfig, val rw: Runway, val end: RunwayEnd) {
@@ -73,8 +81,33 @@ class RwyCtx(val airport: Airport, val graph: TaxiGraph, val config: SimConfig, 
             val p = graph.pathTo(r, n, best) ?: continue
             val nodes = p.first.reversedArray(); val edges = p.second.reversedArray()
             val dst = Destination(h.id, h.node!!, n, ref, ref, end.designator, graph.nx[n], graph.ny[n])
-            out += RunwayExit(ref, dst, best, line.project(graph.nx[best], graph.ny[best]), nodes, edges, graph.geometry(nodes, edges))
+            val geom = graph.geometry(nodes, edges)
+            val sx = line.project(graph.nx[best], graph.ny[best])
+            val ang = exitAngle(geom, line.headingAt(sx))
+            out += RunwayExit(ref, dst, best, sx, nodes, edges, geom, ang, ang >= config.retMinDeg && ang <= config.retMaxDeg)
         }
-        out.sortedBy { it.sOnRunway }
+        val sorted = out.sortedBy { it.sOnRunway }
+        // the farthest exit is the last resort; when it is not a rapid exit it is labelled END
+        sorted.lastOrNull()?.let { l ->
+            val i = sorted.size - 1
+            val e = RunwayExit("END", l.hold, l.runwayNode, l.sOnRunway, l.nodes, l.edges, l.geom, l.angleDeg, l.ret, l.ref)
+            e.end = true
+            return@lazy sorted.subList(0, i) + e
+        }
+        sorted
+    }
+
+    /** Angle between the landing heading and the connector's chord over its first ~45 m (a curved exit is judged by where it heads). */
+    private fun exitAngle(g: DoubleArray, landing: Double): Double {
+        var k = 2; var acc = 0.0
+        while (k + 1 < g.size && acc < 45.0) { acc += hypot(g[k] - g[k - 2], g[k + 1] - g[k - 1]); k += 2 }
+        if (k < 4) return 90.0
+        return Polyline.angleDiff(landing, Polyline.headingOf(g[k - 2] - g[0], g[k - 1] - g[1]))
+    }
+
+    /** Exits an arrival of [type] may be offered: rapid exits far enough down the runway for its rollout, plus the runway-end exit. */
+    fun offered(type: AircraftType): List<RunwayExit> {
+        val min = config.exitMinM(type)
+        return exits.filter { it.end || (it.ret && it.sOnRunway >= min) }
     }
 }

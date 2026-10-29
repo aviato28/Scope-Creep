@@ -172,9 +172,9 @@ fun hintFor(g: GameController): String? {
     }
     return when (g.mode) {
         io.github.aviato28.scopecreep.game.Mode.PUSH -> "Pick which way it should face"
-        io.github.aviato28.scopecreep.game.Mode.DEST -> "Tap a pulsing hold point on the map, or a chip"
-        io.github.aviato28.scopecreep.game.Mode.ROUTES -> "Choose a route chip (the map previews it), tap it again or SEND. Tap a taxiway to route via it"
-        io.github.aviato28.scopecreep.game.Mode.BUILD -> "Tap a taxiway chip at each junction"
+        io.github.aviato28.scopecreep.game.Mode.DEST -> "Tap a pulsing hold point, a runway or a stand on the map (or a chip)"
+        io.github.aviato28.scopecreep.game.Mode.PLAN -> "The route is drawn. Tap a taxiway to go via it, tap the route to avoid a part, then SEND"
+        io.github.aviato28.scopecreep.game.Mode.EXIT -> "Pick the exit to vacate by, or leave the auto-pick"
         else -> when (a.state) {
             AcState.REQUEST_PUSH -> "Choose PUSHBACK APPROVED"
             AcState.REQUEST_TAXI -> "Choose TAXI, then a hold point"

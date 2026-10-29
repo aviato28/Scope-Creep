@@ -3,12 +3,13 @@ package io.github.aviato28.scopecreep.sim
 import io.github.aviato28.scopecreep.sim.airport.Airport
 import io.github.aviato28.scopecreep.sim.airport.GraphValidator
 import io.github.aviato28.scopecreep.sim.airport.Runway
-import io.github.aviato28.scopecreep.sim.routing.BuildSession
 import io.github.aviato28.scopecreep.sim.routing.Destination
 import io.github.aviato28.scopecreep.sim.routing.Route
 import io.github.aviato28.scopecreep.sim.routing.Router
 import io.github.aviato28.scopecreep.sim.routing.TaxiGraph
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -42,6 +43,9 @@ class Simulation(
     val pressure get() = Traffic.pressure(config, time)
 
     val aircraft = ArrayList<Aircraft>()
+    /** Follow-me vehicles currently on the airfield. */
+    val followMes = ArrayList<FollowMe>()
+    private var nextFm = 1
     val log = ArrayList<RadioLine>()
     var time = 0.0; private set
     /** Bumped on every discrete change (spawn, state, radio line, removal) so UIs know to refresh. */
@@ -195,12 +199,81 @@ class Simulation(
             }
             i++
         }
+        if (followMes.isNotEmpty()) updateFollowMes(dt)
         if (pending.isNotEmpty()) {
             var k = 0
             while (k < pending.size) { val p = pending[k]; if (p.due <= time) { log += RadioLine(time, p.atc, p.text); revision++; pending.removeAt(k) } else k++ }
         }
         if (time >= nextSecond) { nextSecond = time + 1.0; secondly() }
         checkShiftEnd()
+    }
+
+    // ---- follow-me -------------------------------------------------------------------------------
+
+    /** Spawns the vehicle at the apron node nearest the aircraft that it can drive from (preferring one not on top of the aircraft). */
+    private fun spawnFollowMe(a: Aircraft, r: Route): FollowMe {
+        val target = Destination("fm", "", a.taxiNode, null, "", "", graph.nx[a.taxiNode], graph.ny[a.taxiNode])
+        val cands = spots.map { it.taxiNode }.distinct().sortedBy { hypot(graph.nx[it] - a.x, graph.ny[it] - a.y) }
+        var start = a.taxiNode; var drive: Route? = null
+        for (n in cands.filter { hypot(graph.nx[it] - a.x, graph.ny[it] - a.y) > 50.0 }.take(8)) {
+            val p = router.plan(n, target) ?: continue
+            start = n; drive = p; break
+        }
+        val fm = FollowMe(nextFm++, a.id, graph.nx[start], graph.ny[start])
+        fm.route = r
+        if (drive != null) fm.path = drive.polyline
+        else { fm.path = Polyline.flat(doubleArrayOf(graph.nx[start], graph.ny[start], graph.nx[start] + 0.1, graph.ny[start])) }
+        fm.s = 0.0; fm.heading = fm.path.headingAt(0.0); fm.prevHeading = fm.heading
+        followMes += fm; revision++
+        return fm
+    }
+
+    private fun moveFm(f: FollowMe, d: Double) {
+        f.s = min(f.path.length, f.s + d)
+        f.x = f.path.xAt(f.s); f.y = f.path.yAt(f.s)
+        if (d > 0) f.heading = f.path.headingAt(f.s)
+    }
+
+    private fun updateFollowMes(dt: Double) {
+        var i = 0
+        while (i < followMes.size) {
+            val f = followMes[i]
+            f.prevX = f.x; f.prevY = f.y; f.prevHeading = f.heading
+            val a = find(f.aircraftId)
+            when (f.phase) {
+                FollowMe.Phase.APPROACH -> {
+                    if (a == null || a.escort !== f) f.phase = FollowMe.Phase.PEEL
+                    else {
+                        f.speed = config.followMeApproachSpeed
+                        moveFm(f, f.speed * dt)
+                        if (f.s >= f.path.length - 0.05) {
+                            val r = f.route!!
+                            beginTaxi(a, r, r.destination)
+                            f.path = a.path; f.s = min(config.followMeGapM, a.path.length); f.phase = FollowMe.Phase.LEADING
+                            f.x = f.path.xAt(f.s); f.y = f.path.yAt(f.s); f.heading = f.path.headingAt(f.s); f.prevX = f.x; f.prevY = f.y; f.prevHeading = f.heading
+                            revision++
+                        }
+                    }
+                }
+                FollowMe.Phase.LEADING -> {
+                    if (a == null || a.escort !== f || a.path !== f.path) f.phase = FollowMe.Phase.PEEL
+                    else {
+                        // wait for the aircraft when the gap opens (it is held, crossing-stopped or slow)
+                        f.speed = if (f.s - a.s < config.followMeGapM + 15.0) config.followMeSpeed else 0.0
+                        moveFm(f, f.speed * dt)
+                        if (f.s >= f.path.length - config.followMeGapM) { f.phase = FollowMe.Phase.PEEL; a.escort = null; revision++ }
+                    }
+                }
+                FollowMe.Phase.PEEL -> {
+                    if (f.peelT == 0.0 && a != null && a.escort === f) a.escort = null
+                    f.peelT += dt; f.speed = 4.0
+                    val h = Math.toRadians(f.heading + 90.0)
+                    f.x += sin(h) * f.speed * dt; f.y += cos(h) * f.speed * dt
+                    if (f.peelT >= 4.0) { followMes.removeAt(i); revision++; continue }
+                }
+            }
+            i++
+        }
     }
 
     // ---- wind & configuration ------------------------------------------------------------------
@@ -256,32 +329,23 @@ class Simulation(
 
     fun legalInstructions(a: Aircraft): List<InstructionKind> = when (a.state) {
         AcState.REQUEST_PUSH -> listOf(InstructionKind.PUSHBACK)
-        AcState.REQUEST_TAXI -> listOf(InstructionKind.TAXI)
+        AcState.REQUEST_TAXI -> if (a.escort != null) emptyList() else listOf(InstructionKind.TAXI)
         AcState.TAXIING -> listOf(if (a.held) InstructionKind.CONTINUE else InstructionKind.HOLD_POSITION, InstructionKind.AMEND_ROUTE)
         AcState.HOLDING_XING -> listOfNotNull(InstructionKind.CROSS_RUNWAY.takeIf { canCross(a) }, InstructionKind.AMEND_ROUTE)
         AcState.HOLDING_SHORT -> listOfNotNull(
             InstructionKind.LINE_UP.takeIf { canLineUp(a) }, InstructionKind.TAKEOFF.takeIf { canTakeoff(a) }, InstructionKind.AMEND_ROUTE)
         AcState.LINED_UP -> if (a.armedTakeoff || !canTakeoff(a)) emptyList() else listOf(InstructionKind.TAKEOFF)
-        AcState.FINAL -> listOfNotNull(InstructionKind.CLEARED_TO_LAND.takeIf { canClearToLand(a) }, InstructionKind.GO_AROUND)
+        AcState.FINAL -> if (a.cleared) listOfNotNull(InstructionKind.VACATE_VIA.takeIf { exitOptions(a).isNotEmpty() }, InstructionKind.GO_AROUND)
+            else listOfNotNull(InstructionKind.CLEARED_TO_LAND.takeIf { canClearToLand(a) }, InstructionKind.GO_AROUND)
         AcState.ROLLOUT -> if (exitOptions(a).isNotEmpty()) listOf(InstructionKind.VACATE_VIA) else emptyList()
-        AcState.VACATED -> listOf(InstructionKind.TAXI)
+        AcState.VACATED -> if (a.escort != null) emptyList() else listOf(InstructionKind.TAXI)
         else -> emptyList()
     }
 
-    fun suggestRoutes(a: Aircraft, dest: Destination): List<Route> = router.suggestRoutes(a.taxiNode, dest, bans = a.noEdges)
-    fun newBuild(a: Aircraft, dest: Destination) = BuildSession(router, a.taxiNode, dest, -1, a.noEdges, a.heading)
-
-    /** Route to [dest] through the tapped taxiway edges [vias] (graph edge indices); the pathfinder fills the gaps. */
-    fun suggestVia(a: Aircraft, dest: Destination, vias: List<Int>): List<Route> =
-        router.viaRoutes(a.taxiNode, dest, vias, -1, a.noEdges)
-
-    /** As [suggestVia] for an amendment: the best of the aircraft's possible start nodes. */
-    fun suggestAmendVia(a: Aircraft, dest: Destination, vias: List<Int>): List<Route> {
-        val out = ArrayList<Route>()
-        for (st in amendStarts(a)) if (st.node != dest.node) out += router.viaRoutes(st.node, dest, vias, st.ban)
-        val r = out.minByOrNull { it.lengthM } ?: return emptyList()
-        return listOf(r)
-    }
+    /** The controller-style route for a stopped aircraft ([vias] = tapped taxiway edges, [avoid] = edges to keep off); null when impossible. */
+    fun planRoute(a: Aircraft, dest: Destination, vias: List<Int> = emptyList(), avoid: Set<Int> = emptySet()): Route? =
+        router.plan(a.taxiNode, dest, vias, avoid + a.noEdges)
+    fun suggestRoutes(a: Aircraft, dest: Destination): List<Route> = listOfNotNull(planRoute(a, dest))
 
     /** Pushback directions offered for [a] (derived from the stand lead-in's junction). */
     fun pushOptions(a: Aircraft): List<PushOption> = spots[a.spot].options
@@ -310,6 +374,8 @@ class Simulation(
         return false
     }
     private fun etaToTouchdown(b: Aircraft) = (b.thrS + config.touchdownZoneM - b.s) / config.approachSpeed
+    /** Seconds to touchdown for an aircraft on final (strips). */
+    fun etaS(b: Aircraft) = etaToTouchdown(b)
     /** A cleared arrival on this runway closer than [withinS] seconds from touchdown. */
     private fun arrivalSoon(rwId: String, withinS: Double, clearedOnly: Boolean = true): Boolean {
         for (b in aircraft) if (b.state == AcState.FINAL && (b.cleared || !clearedOnly) && rid(b.rwyEnd) == rwId && etaToTouchdown(b) < withinS) return true
@@ -380,12 +446,31 @@ class Simulation(
 
     // arrival queries -------------------------------------------------------------------------------
 
-    /** Exits the aircraft can still make, nearest first. Indexes are what [VacateVia] takes. */
+    /**
+     * Exits the aircraft can still make, nearest first: rapid exits angled for its landing direction beyond the type's minimum
+     * distance, plus the runway-end exit. Offered from landing clearance on (the touchdown point is assumed until it is rolling).
+     * Indexes are what [VacateVia] takes; [VacateVia.exitId] is more robust.
+     */
     fun exitOptions(a: Aircraft): List<RunwayExit> {
-        if (a.state != AcState.ROLLOUT) return emptyList()
-        val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
-        val stop = max(0.0, (a.speed * a.speed - config.exitSpeed * config.exitSpeed) / (2 * config.rolloutMaxDecel))
-        return c.exits.filter { it.sOnRunway >= cur + stop + 20.0 }
+        val rolling = a.state == AcState.ROLLOUT
+        if (!rolling && !(a.state == AcState.FINAL && a.cleared)) return emptyList()
+        val c = ctx(a.rwyEnd)
+        val cur = if (rolling) c.line.project(a.x, a.y) else config.touchdownZoneM
+        val v = if (rolling) a.speed else config.touchdownSpeed
+        val stop = max(0.0, (v * v - config.exitSpeed * config.exitSpeed) / (2 * config.rolloutMaxDecel))
+        return c.offered(a.type).filter { it.sOnRunway >= cur + stop + 20.0 }
+    }
+
+    /** The exit the pilot takes when the controller names none: the first suitable rapid exit beyond the type's typical rollout. */
+    fun defaultExit(a: Aircraft): RunwayExit? {
+        val opts = exitOptions(a)
+        if (opts.isNotEmpty()) {
+            val roll = config.rolloutM(a.type)
+            val pref = opts.filter { it.ret && it.sOnRunway >= roll }
+            return pref.firstOrNull { !blockedExit(it, a) } ?: pref.firstOrNull() ?: opts.firstOrNull { !blockedExit(it, a) } ?: opts.first()
+        }
+        val c = ctx(a.rwyEnd); val cur = if (a.state == AcState.ROLLOUT) c.line.project(a.x, a.y) else config.touchdownZoneM
+        return c.exits.lastOrNull { it.sOnRunway > cur + 20.0 }
     }
 
     /** All stand destinations (arrival targets). */
@@ -446,26 +531,26 @@ class Simulation(
         return all.filter { d -> reach.any { (st, dist) -> (st.node == d.node && a.state != AcState.HOLDING_SHORT) || (st.node != d.node && dist[d.node].isFinite()) } }
     }
 
-    /** Up to 3 routes to [dest] starting at the aircraft's amend start(s), shortest first. */
-    fun suggestAmend(a: Aircraft, dest: Destination): List<Route> {
-        val found = ArrayList<Pair<Double, Route>>()
+    /** The best amended route to [dest] from the aircraft's possible start nodes (escort-only edges are never used here), or null. */
+    fun planAmend(a: Aircraft, dest: Destination, vias: List<Int> = emptyList(), avoid: Set<Int> = emptySet()): Route? {
+        var best: Route? = null; var bestCost = Double.POSITIVE_INFINITY
         for (st in amendStarts(a)) {
             val extra = hypot(graph.nx[st.node] - a.x, graph.ny[st.node] - a.y)
-            if (st.node == dest.node) {
-                if (a.state != AcState.HOLDING_SHORT) found += extra to Route(intArrayOf(st.node), IntArray(0), emptyList(), 0.0, dest, false, doubleArrayOf(graph.nx[st.node], graph.ny[st.node]))
-                continue
-            }
-            for (r in router.suggestRoutes(st.node, dest, 3, st.ban)) found += (r.lengthM + extra) to r
+            val r = if (st.node == dest.node) {
+                if (a.state == AcState.HOLDING_SHORT) null
+                else Route(intArrayOf(st.node), IntArray(0), emptyList(), 0.0, dest, true, doubleArrayOf(graph.nx[st.node], graph.ny[st.node]))
+            } else router.plan(st.node, dest, vias, if (st.ban >= 0) avoid + st.ban else avoid, escortOk = false)
+            if (r != null && r.lengthM + extra < bestCost) { best = r; bestCost = r.lengthM + extra }
         }
-        val out = ArrayList<Route>(); val seen = HashSet<Pair<List<String>, Int>>()
-        for ((_, r) in found.sortedBy { it.first }) { if (seen.add(r.refs to r.nodes[0]) && out.size < 3) out += Route(r.nodes, r.edges, r.refs, r.lengthM, r.destination, out.isEmpty(), r.pts) }
-        return out
+        return best
     }
+    fun suggestAmend(a: Aircraft, dest: Destination): List<Route> = listOfNotNull(planAmend(a, dest))
 
-    fun newAmendBuild(a: Aircraft, dest: Destination, startNode: Int): BuildSession? {
-        val st = amendStarts(a).firstOrNull { it.node == startNode } ?: return null
-        return BuildSession(router, st.node, dest, st.ban, emptySet(), a.heading)
-    }
+    /** Every free stand (arrival targets the player may tap on the map). */
+    fun freeStands(a: Aircraft): List<Destination> = standDests.filter { standFree(it, a) }
+
+    /** Spoken/preview body of the taxi instruction for a route, e.g. "taxi via N, B, holding point A2 runway 27R". */
+    fun routeText(r: Route): String = routeBody(r, r.destination)
 
     fun find(id: Int): Aircraft? = aircraft.firstOrNull { it.id == id }
 
@@ -497,6 +582,16 @@ class Simulation(
         a.xingS = xs.toDoubleArray(); a.xingRwy = xr.toTypedArray(); a.xingDone = 0; a.xHold = false; a.crossing = false
     }
 
+    /** Starts the aircraft on [r] (shared by TAXI, TAXI-to-stand and the follow-me hand-over). */
+    private fun beginTaxi(a: Aircraft, r: Route, d: Destination) {
+        if (a.isArrival) a.standDest = d
+        a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false; a.routeOffset = 0.0; a.preEdge = -1
+        startRouteStats(a, r)
+        a.instruction = if (d.stand) "TAXI STAND ${d.label}" else "TAXI " + r.refs.joinToString(" ")
+        a.path = r.polyline; a.s = 0.0; a.pathDone = false; a.speed = 0.0
+        setRoute(a, r, 0.0)
+    }
+
     fun submit(cmd: Command): Boolean {
         val a = find(cmd.aircraftId) ?: return false
         when (cmd) {
@@ -515,35 +610,35 @@ class Simulation(
             }
             is Taxi -> {
                 val r = cmd.route
-                if (a.state != AcState.REQUEST_TAXI || r.nodes.firstOrNull() != a.taxiNode || !validDest(a, r.destination)) return false
-                if (r.edges.isNotEmpty() && r.edges[0] in a.noEdges) return false
+                if (a.state != AcState.REQUEST_TAXI || a.escort != null || r.nodes.firstOrNull() != a.taxiNode || !validDest(a, r.destination)) return false
+                if (r.edges.isNotEmpty() && r.edges[0] in a.noEdges || r.needsEscort) return false
                 val d = r.destination
                 val body = routeBody(r, d)
                 atc("${a.spoken}, $body."); pilot("${body.replaceFirstChar { it.uppercase() }}, ${a.spoken}.")
-                a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false; a.routeOffset = 0.0; a.preEdge = -1
-                startRouteStats(a, r)
-                a.instruction = "TAXI " + r.refs.joinToString(" ")
-                a.path = r.polyline; a.s = 0.0; a.pathDone = false; a.speed = 0.0
-                setRoute(a, r, 0.0)
+                beginTaxi(a, r, d)
+            }
+            is FollowMeTaxi -> {
+                val r = cmd.route; val d = r.destination
+                if ((a.state != AcState.REQUEST_TAXI && a.state != AcState.VACATED) || a.escort != null || !r.needsEscort) return false
+                if (r.nodes.firstOrNull() != a.taxiNode || !validDest(a, d) || (r.edges.isNotEmpty() && r.edges[0] in a.noEdges)) return false
+                val fm = spawnFollowMe(a, r)
+                val body = routeBody(r, d)
+                atc("${a.spoken}, follow the follow-me, $body."); pilot("Follow the follow-me, $body, ${a.spoken}.")
+                a.escort = fm; a.instruction = "AWAIT FOLLOW-ME"
             }
             is TaxiToStand -> {
                 val r = cmd.route; val d = r.destination
-                if (a.state != AcState.VACATED || r.nodes.firstOrNull() != a.taxiNode || !validDest(a, d)) return false
+                if (a.state != AcState.VACATED || a.escort != null || r.needsEscort || r.nodes.firstOrNull() != a.taxiNode || !validDest(a, d)) return false
                 if (r.edges.isNotEmpty() && r.edges[0] in a.noEdges) return false
                 val body = routeBody(r, d)
                 atc("${a.spoken}, $body."); pilot("${body.replaceFirstChar { it.uppercase() }}, ${a.spoken}.")
-                a.standDest = d
-                a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false; a.routeOffset = 0.0; a.preEdge = -1
-                startRouteStats(a, r)
-                a.instruction = "TAXI STAND ${d.label}"
-                a.path = r.polyline; a.s = 0.0; a.pathDone = false; a.speed = 0.0
-                setRoute(a, r, 0.0)
+                beginTaxi(a, r, d)
             }
             is AmendRoute -> {
                 val r = cmd.route; val d = r.destination
                 if (a.state != AcState.TAXIING && a.state != AcState.HOLDING_SHORT && a.state != AcState.HOLDING_XING) return false
                 val st = amendStarts(a).firstOrNull { it.node == r.nodes.firstOrNull() } ?: return false
-                if (!validDest(a, d) || (r.edges.isNotEmpty() && r.edges[0] == st.ban)) return false
+                if (a.escort != null || r.needsEscort || !validDest(a, d) || (r.edges.isNotEmpty() && r.edges[0] == st.ban)) return false
                 if (st.node == d.node && a.state == AcState.HOLDING_SHORT) return false
                 val body = routeBody(r, d)
                 atc("${a.spoken}, amend route, $body."); pilot("Amend route, $body, ${a.spoken}.")
@@ -600,8 +695,12 @@ class Simulation(
             is ClearedToLand -> {
                 if (!canClearToLand(a)) return false
                 val des = a.rwyEnd
-                atc("${a.spoken}, runway $des, cleared to land."); pilot("Cleared to land runway $des, ${a.spoken}.")
                 a.cleared = true; a.instruction = "CLEARED LDG"
+                val ex = cmd.exitId?.let { id -> exitOptions(a).firstOrNull { it.hold.id == id } }
+                if (ex != null) {
+                    atc("${a.spoken}, runway $des, cleared to land, vacate via ${ex.say}."); pilot("Cleared to land runway $des, vacate via ${ex.say}, ${a.spoken}.")
+                    a.exitPick = ex
+                } else { atc("${a.spoken}, runway $des, cleared to land."); pilot("Cleared to land runway $des, ${a.spoken}.") }
             }
             is GoAround -> {
                 if (a.state != AcState.FINAL) return false
@@ -609,12 +708,12 @@ class Simulation(
                 startGoAround(a, GoAroundReason.COMMANDED, quiet = true)
             }
             is VacateVia -> {
-                if (a.state != AcState.ROLLOUT) return false
+                if (a.state != AcState.ROLLOUT && !(a.state == AcState.FINAL && a.cleared)) return false
                 val opts = exitOptions(a)
-                val ex = (if (cmd.exitIdx < 0) null else opts.getOrNull(cmd.exitIdx)) ?: if (cmd.exitIdx < 0) pickDefaultExit(a) else null
-                ex ?: return false
-                atc("${a.spoken}, vacate via ${ex.label}."); pilot("Vacate via ${ex.label}, ${a.spoken}.")
-                takeExit(a, ex)
+                val ex = (if (cmd.exitId != null) opts.firstOrNull { it.hold.id == cmd.exitId } else if (cmd.exitIdx >= 0) opts.getOrNull(cmd.exitIdx) else defaultExit(a)) ?: return false
+                atc("${a.spoken}, vacate via ${ex.say}."); pilot("Vacate via ${ex.say}, ${a.spoken}.")
+                a.exitPick = ex
+                if (a.state == AcState.ROLLOUT) takeExit(a, ex) else a.instruction = "CLEARED LDG ${ex.label}"
             }
         }
         revision++
@@ -745,13 +844,6 @@ class Simulation(
         }
         return false
     }
-    private fun pickDefaultExit(a: Aircraft): RunwayExit? {
-        val opts = exitOptions(a)
-        if (opts.isNotEmpty()) return opts.firstOrNull { !blockedExit(it, a) } ?: opts.first()
-        val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
-        return c.exits.lastOrNull { it.sOnRunway > cur + 20.0 }
-    }
-
     private fun takeExit(a: Aircraft, ex: RunwayExit) {
         val c = ctx(a.rwyEnd); val cur = c.line.project(a.x, a.y)
         val sx = max(ex.sOnRunway, cur + 1.0)
@@ -796,6 +888,8 @@ class Simulation(
                     if (a.crossing) { if (a.s > a.xingS[a.xingDone] + config.crossAfterM) { a.crossing = false; a.xingDone++; a.instruction = if (a.isArrival) "TAXI STAND ${a.destination?.label}" else "TAXI " + (a.route?.refs?.joinToString(" ") ?: "") } }
                     else stopS = a.xingS[a.xingDone] - config.crossHoldM
                 }
+                val fm = a.escort
+                if (fm != null) a.gapAllow = min(a.gapAllow, max(0.0, fm.s - config.followMeGapM - a.s))
                 follow(a, dt, if (a.held) 0.0 else config.taxiSpeed, stopS)
                 if (stopS < Double.POSITIVE_INFINITY && !a.held && a.s >= stopS - 0.3 && a.speed < 0.3) {
                     a.state = AcState.HOLDING_XING; a.xHold = true; a.speed = 0.0
@@ -886,9 +980,10 @@ class Simulation(
 
     private fun rolloutUpdate(a: Aircraft, dt: Double) {
         val ve = config.exitSpeed
-        if (a.exitAtS == Double.POSITIVE_INFINITY && (a.speed <= config.touchdownSpeed - 0.6 * (config.touchdownSpeed - ve) || exitOptions(a).size <= 1)) {
-            val ex = pickDefaultExit(a)
-            if (ex != null) { takeExit(a, ex); pilot("Vacating via ${ex.label}, ${a.spoken}.") }
+        if (a.exitAtS == Double.POSITIVE_INFINITY && (a.exitPick != null || a.speed <= config.touchdownSpeed - 0.6 * (config.touchdownSpeed - ve) || exitOptions(a).size <= 1)) {
+            val pick = a.exitPick?.takeIf { p -> exitOptions(a).any { it.hold.id == p.hold.id } }
+            val ex = pick ?: defaultExit(a)
+            if (ex != null) { takeExit(a, ex); if (pick == null) pilot("Vacating via ${ex.label}, ${a.spoken}.") }
         }
         if (a.exitAtS.isFinite()) {
             val room = max(0.0, a.exitAtS - a.s)
@@ -1118,7 +1213,7 @@ class Simulation(
 
     /** Tracks how long a pilot has waited on ATC and re-calls every [SimConfig.recallSeconds]. */
     private fun waitTick(a: Aircraft) {
-        val ws = when (a.state) {
+        val ws = if (a.escort != null && (a.state == AcState.REQUEST_TAXI || a.state == AcState.VACATED)) null else when (a.state) {
             AcState.REQUEST_PUSH, AcState.REQUEST_TAXI, AcState.HOLDING_SHORT, AcState.VACATED, AcState.HOLDING_XING -> a.state
             AcState.LINED_UP -> if (a.armedTakeoff) null else a.state
             else -> null

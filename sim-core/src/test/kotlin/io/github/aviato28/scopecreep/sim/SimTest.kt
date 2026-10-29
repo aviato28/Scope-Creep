@@ -36,27 +36,11 @@ class RoutingTest {
         assertEquals(listOf("A", "C", "B"), r.compress(nodes3, r.edgesOf(nodes3.toList())))
     }
 
-    @Test fun `suggestRoutes gives distinct routes with shortest flagged`() {
+    @Test fun `plan finds the shortest simple route and flags it fastest`() {
         val dest = Destination("h", "N3", id("N3"), "A9", "A9", "27", 250.0, 80.0)
-        val rs = r.suggestRoutes(id("N0"), dest)
-        assertTrue(rs.size >= 2)
-        assertEquals(rs.size, rs.map { it.refs }.toSet().size)
-        assertTrue(rs[0].fastest && rs.drop(1).none { it.fastest })
-        assertEquals(250.0, rs[0].lengthM, 0.01)
-        assertTrue(rs.all { it.nodes.last() == dest.node })
-    }
-
-    @Test fun `build mode offers refs at junction and can undo`() {
-        val dest = Destination("h", "N3", id("N3"), "A9", "A9", "27", 250.0, 80.0)
-        val b = BuildSession(r, id("N0"), dest)
-        assertEquals(setOf("A", "B"), b.options().map { it.ref }.toSet())
-        b.apply(b.options().first { it.ref == "A" })
-        assertEquals(id("N1"), b.current)
-        assertTrue(b.options().isNotEmpty())
-        b.apply(b.options().first { it.ref == "A" })
-        assertTrue(b.complete); assertNotNull(b.route())
-        b.undo(); assertEquals(id("N1"), b.current)
-        b.undo(); assertEquals(id("N0"), b.current); assertFalse(b.canUndo())
+        val p = r.plan(id("N0"), dest)!!
+        assertTrue(p.fastest); assertEquals(250.0, p.lengthM, 0.01)
+        assertEquals(dest.node, p.nodes.last())
     }
 }
 
@@ -107,27 +91,13 @@ class VoblSimTest {
             println("${d.label}: " + rs.joinToString(" | ") { "${it.chipText} %.0fm%s".format(it.lengthM, if (it.fastest) "*" else "") })
             if (rs.isEmpty()) continue
             checked++
-            assertEquals(rs.size, rs.map { it.refs }.toSet().size)
-            assertTrue(rs.size <= 3 && rs[0].fastest)
+            assertTrue(rs.size == 1 && rs[0].fastest)
             for (r in rs) {
                 assertEquals(d.node, r.nodes.last()); assertEquals(ac.taxiNode, r.nodes.first())
                 assertTrue(r.edges.none { sim.graph.edges[it].kind == "runway" })
             }
         }
         assertTrue(checked >= 3)
-    }
-
-    @Test fun `legalNextRefs is non empty at a junction`() {
-        val sim = Simulation(airport, 7, SimConfig(arrivalsEnabled = false)); sim.step()
-        val ac = sim.aircraft.first(); val d = sim.destinations.first()
-        val opts = sim.router.legalNextRefs(ac.taxiNode, listOf(ac.taxiNode), d)
-        println("options at start: " + opts.joinToString { it.ref })
-        assertTrue(opts.isNotEmpty())
-        // a full BUILD walk always terminates at the hold by taking the best option each time
-        val b = sim.newBuild(ac, d); var guard = 0
-        while (!b.complete && guard++ < 60) { val o = b.options(); assertTrue(o.isNotEmpty(), "dead end after ${b.refs()}"); b.apply(o.first()) }
-        assertTrue(b.complete)
-        println("build: " + b.refs())
     }
 
     @Test fun `departure reaches AIRBORNE from stand`() {

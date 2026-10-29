@@ -52,6 +52,14 @@ data class SimConfig(
     val touchdownZoneM: Double = 300.0,      // touchdown point beyond the threshold
     val exitSpeed: Double = 12.0,            // m/s when turning off
     val rolloutDecel: Double = 3.0, val rolloutMaxDecel: Double = 6.0,
+    /** Rapid-exit classification (decision 22 follow-up): angle window (deg) of an exit connector relative to the landing direction. */
+    val retMinDeg: Double = 10.0, val retMaxDeg: Double = 60.0,
+    /** No exit is offered closer to the threshold than this (m): jets, turboprops, heavies. Default exit: first rapid exit beyond the typical rollout. */
+    val exitMinJetM: Double = 1200.0, val exitMinTurbopropM: Double = 800.0, val exitMinHeavyM: Double = 1500.0,
+    val rolloutJetM: Double = 1350.0, val rolloutTurbopropM: Double = 900.0, val rolloutHeavyM: Double = 1800.0,
+    // ---- follow-me ----
+    /** Follow-me leads at ~10 kt, drives to the aircraft faster, and the aircraft keeps ~40 m behind it. */
+    val followMeSpeed: Double = 5.1, val followMeApproachSpeed: Double = 8.0, val followMeGapM: Double = 40.0,
     /** Landing decision point (m before the threshold): runway must be clear; cleared-to-land needed before [noClearanceGoAroundM]. */
     val decisionM: Double = 1852.0, val noClearanceGoAroundM: Double = 926.0, val landingRecallM: Double = 3700.0,
     val goAroundSeconds: Double = 30.0, val goAroundRejoinMin: Double = 180.0, val goAroundRejoinMax: Double = 240.0,
@@ -97,4 +105,8 @@ data class SimConfig(
     val strikesEndShift: Boolean = false,
     /** In mixed mode (one runway for both) arrivals are at least this far apart, and never spawn while a departure is lined up or rolling. */
     val mixedArrivalIntervalS: Double = 120.0,
-)
+) {
+    private fun turboprop(t: AircraftType) = t.code in setOf("AT72", "AT76", "DH8C", "DH8D", "E120")
+    fun exitMinM(t: AircraftType) = if (t.wake >= Wake.H) exitMinHeavyM else if (turboprop(t)) exitMinTurbopropM else exitMinJetM
+    fun rolloutM(t: AircraftType) = if (t.wake >= Wake.H) rolloutHeavyM else if (turboprop(t)) rolloutTurbopropM else rolloutJetM
+}

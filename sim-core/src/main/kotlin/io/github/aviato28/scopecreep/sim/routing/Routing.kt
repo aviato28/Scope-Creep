@@ -8,26 +8,135 @@ class Destination(val id: String, val nodeId: String, val node: Int, val ref: St
 /** A complete taxi route. [refs] is the chip sequence; the last element is typically the hold's own ref. */
 class Route(
     val nodes: IntArray, val edges: IntArray, val refs: List<String>, val lengthM: Double,
-    val destination: Destination, val fastest: Boolean, val pts: DoubleArray,
+    val destination: Destination, val fastest: Boolean, val pts: DoubleArray, val needsEscort: Boolean = false,
 ) {
     val polyline: Polyline by lazy { Polyline.flat(pts) }
     val chipText: String get() = refs.joinToString(" ").ifEmpty { "DIRECT" }
 }
 
-/** One BUILD-mode choice: a taxiway ref and the first edge that starts it. */
-class BuildOption(val ref: String, val edge: Int, val remainingM: Double, val turnDeg: Double = 0.0, val best: Boolean = false) {
-    /** Arrow glyph for the turn relative to the direction of travel (right is positive). */
-    val arrow: String get() = when {
-        turnDeg < -135 -> "↶"; turnDeg < -65 -> "←"; turnDeg < -22 -> "↖"; turnDeg <= 22 -> "↑"
-        turnDeg <= 65 -> "↗"; turnDeg <= 135 -> "→"; else -> "↷"
-    }
-}
-
 class Router(val g: TaxiGraph) {
-    private val distCache = HashMap<Int, DoubleArray>()
+    companion object {
+        /** Controller-style cost model (metres of extra "distance"): tuned so straight-along-one-taxiway beats zig-zags of similar length. */
+        const val REF_CHANGE_M = 60.0
+        const val TURN_45_M = 25.0
+        const val TURN_100_M = 55.0
+        const val UTURN_M = 400.0
+    }
 
-    /** Distance to [dest] from every node (no leaf/runway shortcuts). */
-    private fun distTo(dest: Int): DoubleArray = distCache.getOrPut(dest) { g.search(dest).dist }
+    private val refNames = ArrayList<String>().apply { add("") }
+    private val refIdx = HashMap<String, Int>()
+    init { for (e in g.edges) for (r in e.refs) refIdx.getOrPut(r) { refNames.add(r); refNames.size - 1 } }
+    private val nr = refNames.size
+
+    private fun edgeOf(s: Int) = s / nr / 2
+    private fun fwdOf(s: Int) = (s / nr) % 2 == 1
+    private fun refOf(s: Int) = s % nr
+    private fun nodeOf(s: Int): Int { val e = g.edges[edgeOf(s)]; return if (fwdOf(s)) e.b else e.a }
+
+    private fun turnPenalty(deg: Double) = when {
+        deg > 150.0 -> UTURN_M
+        deg > 100.0 -> TURN_45_M + TURN_100_M
+        deg > 45.0 -> TURN_45_M
+        else -> 0.0
+    }
+
+    /** Dijkstra over (directed edge, current taxiway ref) states; the cost adds ref-change and turn penalties. */
+    private inner class Search(val avoid: Set<Int>, val escort: Boolean, val leafOk: Int) {
+        val dist = DoubleArray(g.edges.size * 2 * nr) { Double.POSITIVE_INFINITY }
+        val par = IntArray(dist.size) { -1 }
+        val pq = java.util.PriorityQueue<Pair<Double, Int>>(compareBy<Pair<Double, Int>> { it.first }.thenBy { it.second })
+
+        fun relax(u: Int, prev: Int, d: Double) {
+            val pe = if (prev >= 0) g.edges[edgeOf(prev)] else null
+            val thru = pe != null && g.touchesRunway(u)
+            if (thru && !g.crossing[u]) return // runway-entry nodes are terminal unless they are a crossing
+            val l = if (prev >= 0) refOf(prev) else 0
+            for (ei in g.adj[u]) {
+                val e = g.edges[ei]
+                if (ei in avoid || (e.escortOnly && !escort) || (pe != null && ei == pe.idx)) continue
+                if (thru) { val sp = g.crossSide(pe!!.idx, u); if (sp == 0 || g.crossSide(ei, u) != -sp) continue }
+                val v = g.other(e, u)
+                if (g.isLeaf(v) && v != leafOk) continue
+                var c = e.length; var r = l
+                if (e.refs.isNotEmpty()) {
+                    r = if (l != 0 && refNames[l] in e.refs) l else refIdx.getValue(e.refs[0])
+                    if (l != 0 && r != l) c += REF_CHANGE_M
+                }
+                if (pe != null && !g.isLeaf(v) && !g.isLeaf(g.other(pe, u)))
+                    c += turnPenalty(io.github.aviato28.scopecreep.sim.Polyline.angleDiff(g.arrivingHeading(pe, u), g.leavingHeading(e, u)))
+                val ns = (ei * 2 + (if (e.a == u) 1 else 0)) * nr + r
+                if (d + c < dist[ns]) { dist[ns] = d + c; par[ns] = prev; pq += (d + c) to ns }
+            }
+        }
+
+        /** Runs from [src] (or continues from state [from] at [fromCost]); returns the first popped state satisfying [stop], or -1. */
+        fun run(src: Int, from: Int, fromCost: Double, stop: (Int) -> Boolean): Int {
+            if (from >= 0) { dist[from] = fromCost; pq += fromCost to from } else relax(src, -1, 0.0)
+            while (pq.isNotEmpty()) {
+                val (d, s) = pq.poll()
+                if (d > dist[s]) continue
+                if (stop(s)) return s
+                relax(nodeOf(s), s, d)
+            }
+            return -1
+        }
+
+        fun pathTo(end: Int, from: Int): IntArray {
+            val es = ArrayList<Int>(); var s = end
+            while (s >= 0 && s != from) { es += edgeOf(s); s = par[s] }
+            es.reverse(); return es.toIntArray()
+        }
+    }
+
+    private class Cand(val state: Int, val cost: Double, val edges: List<Int>)
+
+    private fun plan1(from: Int, dest: Destination, vias: List<Int>, avoid: Set<Int>, escort: Boolean): Pair<IntArray, IntArray>? {
+        var front = listOf(Cand(-1, 0.0, emptyList()))
+        for (v in vias) {
+            if (v in avoid || (g.edges[v].escortOnly && !escort)) continue
+            val best = arrayOfNulls<Cand>(2)
+            for (c in front) {
+                val se = Search(avoid, escort, -1)
+                val src = if (c.state < 0) from else nodeOf(c.state)
+                se.run(src, c.state, c.cost) { false }
+                for (d in 0..1) {
+                    var bs = -1; var bd = Double.POSITIVE_INFINITY
+                    for (r in 0 until nr) { val s = (v * 2 + d) * nr + r; if (se.dist[s] < bd) { bd = se.dist[s]; bs = s } }
+                    if (bs >= 0 && bd < (best[d]?.cost ?: Double.POSITIVE_INFINITY)) best[d] = Cand(bs, bd, c.edges + se.pathTo(bs, c.state).toList())
+                }
+            }
+            front = best.filterNotNull()
+            if (front.isEmpty()) return null
+        }
+        var bestEdges: List<Int>? = null; var bestCost = Double.POSITIVE_INFINITY
+        for (c in front) {
+            val se = Search(avoid, escort, dest.node)
+            val src = if (c.state < 0) from else nodeOf(c.state)
+            val end = se.run(src, c.state, c.cost) { nodeOf(it) == dest.node }
+            if (end >= 0 && se.dist[end] < bestCost) { bestCost = se.dist[end]; bestEdges = c.edges + se.pathTo(end, c.state).toList() }
+        }
+        val es = bestEdges ?: return null
+        val nodes = IntArray(es.size + 1); nodes[0] = from
+        for (k in es.indices) nodes[k + 1] = g.other(g.edges[es[k]], nodes[k])
+        return nodes to es.toIntArray()
+    }
+
+    /**
+     * The controller-style route from [from] to [dest]: shortest by length plus penalties for changing taxiway and for sharp turns.
+     * [vias] are tapped taxiway edges to pass through (in order), [avoid] are edges that must not be used. When the destination is
+     * only reachable over escort-only edges and [escortOk] is set, the route is flagged [Route.needsEscort].
+     */
+    fun plan(from: Int, dest: Destination, vias: List<Int> = emptyList(), avoid: Set<Int> = emptySet(), escortOk: Boolean = true): Route? {
+        if (from == dest.node) return null
+        val p = plan1(from, dest, vias, avoid, false) ?: (if (escortOk) plan1(from, dest, vias, avoid, true) else null) ?: return null
+        val esc = p.second.any { g.edges[it].escortOnly }
+        val len = p.second.sumOf { g.edges[it].length }
+        return Route(p.first, p.second, compress(p.first, p.second), len, dest, true, g.geometry(p.first, p.second), esc)
+    }
+
+    /** Compatibility wrapper: the single planned route as a list. */
+    fun suggestRoutes(from: Int, dest: Destination, max: Int = 3, ban: Int = -1, bans: Set<Int> = emptySet()): List<Route> =
+        listOfNotNull(plan(from, dest, avoid = if (ban >= 0) bans + ban else bans))
 
     // ---- compression --------------------------------------------------------------------------
 
@@ -52,138 +161,10 @@ class Router(val g: TaxiGraph) {
 
     fun routeOf(nodes: IntArray, es: IntArray, dest: Destination, fastest: Boolean = false): Route {
         val len = es.sumOf { g.edges[it].length }
-        return Route(nodes, es, compress(nodes, es), len, dest, fastest, g.geometry(nodes, es))
-    }
-
-    // ---- suggestions --------------------------------------------------------------------------
-
-    /** Up to 3 distinct (by ref sequence) routes from [from] to [dest], shortest first and flagged FASTEST. */
-    fun suggestRoutes(from: Int, dest: Destination, max: Int = 3, ban: Int = -1, bans: Set<Int> = emptySet()): List<Route> {
-        if (from == dest.node) return emptyList()
-        val used = HashMap<Int, Int>()
-        val found = ArrayList<Route>()
-        val seen = HashSet<List<String>>()
-        for (attempt in 0 until 10) {
-            val r = g.search(from, { e -> if (e.idx == ban || e.idx in bans) Double.POSITIVE_INFINITY else e.length * (1.0 + 0.7 * (used[e.idx] ?: 0)) }, leafOk = dest.node)
-            val p = g.pathTo(r, from, dest.node) ?: break
-            val route = routeOf(p.first, p.second, dest)
-            if (seen.add(route.refs)) found += route
-            for (ei in p.second) used.merge(ei, 1, Int::plus)
-            if (found.size >= max + 1) break
-        }
-        if (found.isEmpty()) return emptyList()
-        val shortest = found.minOf { it.lengthM }
-        val keep = found.filter { it.lengthM <= shortest * 2.5 }.sortedBy { it.lengthM }.take(max)
-        return keep.mapIndexed { i, r -> Route(r.nodes, r.edges, r.refs, r.lengthM, r.destination, i == 0, r.pts) }
-    }
-
-    // ---- BUILD mode ---------------------------------------------------------------------------
-
-    private fun effectiveRef(ei: Int, from: Int, current: String?, dist: DoubleArray?): String? {
-        var e = g.edges[ei]
-        if (e.refs.isNotEmpty()) return if (current != null && current in e.refs) current else e.refs[0]
-        var node = g.other(e, from)
-        repeat(80) {
-            val nxt = g.adj[node].filter { it != e.idx && !g.isLeaf(g.other(g.edges[it], node)) }
-            if (nxt.isEmpty()) return current
-            if (nxt.size != 1 && (current != null || dist == null)) return current
-            e = g.edges[if (nxt.size == 1) nxt[0] else nxt.minBy { dist!![g.other(g.edges[it], node)] + g.edges[it].length }]
-            if (e.refs.isNotEmpty()) return if (current != null && current in e.refs) current else e.refs[0]
-            node = g.other(e, node)
-        }
-        return current
-    }
-
-    /** Taxiway refs reachable from [current] (last node of [routeSoFar]) in one hop, best (closest to [dest]) first. */
-    fun legalNextRefs(current: Int, routeSoFar: List<Int>, dest: Destination?, ban: Int = -1, bans: Set<Int> = emptySet(), startHeading: Double = Double.NaN): List<BuildOption> {
-        val prevNode = if (routeSoFar.size >= 2 && routeSoFar.last() == current) routeSoFar[routeSoFar.size - 2] else -1
-        val prevEdge = if (prevNode >= 0) g.edgeBetween(prevNode, current) else -1
-        val curRef = if (routeSoFar.size >= 2) compressNodes(routeSoFar).lastOrNull() else null
-        val dist = dest?.let { distTo(it.node) }
-        val inHeading = if (prevEdge >= 0) g.arrivingHeading(g.edges[prevEdge], current) else startHeading
-        val groups = LinkedHashMap<String, MutableList<BuildOption>>()
-        for (ei in g.adj[current]) {
-            if (ei == prevEdge || ei == ban || (routeSoFar.size == 1 && ei in bans)) continue
-            val e = g.edges[ei]; val t = g.other(e, current)
-            if (t in routeSoFar) continue
-            if (g.isLeaf(t) && (dest == null || t != dest.node)) continue
-            val rem = if (dist == null) 0.0 else dist[t]
-            if (rem.isInfinite()) continue
-            val ref = effectiveRef(ei, current, curRef, dist) ?: "TWY"
-            val turn = if (inHeading.isNaN()) 0.0 else { var d = (g.leavingHeading(e, current) - inHeading) % 360.0; if (d > 180) d -= 360; if (d < -180) d += 360; d }
-            groups.getOrPut(ref) { ArrayList() } += BuildOption(ref, ei, rem + e.length, turn)
-        }
-        val out = ArrayList<BuildOption>()
-        for ((_, opts) in groups) {
-            out += opts.minBy { it.remainingM }
-        }
-        val bestRem = out.minOfOrNull { it.remainingM }
-        // ordered left to right as seen along the direction of travel; the option closest to the destination is flagged
-        return out.map { BuildOption(it.ref, it.edge, it.remainingM, it.turnDeg, it.remainingM == bestRem) }.sortedBy { it.turnDeg }
-    }
-
-    /**
-     * Routes from [from] to [dest] that pass through each of [vias] (taxiway edges the player tapped), in the order given;
-     * the pathfinder fills the gaps. Each via is entered from whichever end is cheaper. Empty when impossible.
-     */
-    fun viaRoutes(from: Int, dest: Destination, vias: List<Int>, ban: Int = -1, bans: Set<Int> = emptySet()): List<Route> {
-        fun cost(e: TEdge) = if (e.idx == ban || e.idx in bans) Double.POSITIVE_INFINITY else e.length
-        var best: Pair<IntArray, IntArray>? = null; var bestLen = Double.POSITIVE_INFINITY
-        // try both directions for every via (2^n small: n <= 3 used)
-        fun go(k: Int, at: Int, nodes: List<Int>, es: List<Int>) {
-            if (k == vias.size) {
-                val r = g.search(at, ::cost, leafOk = dest.node)
-                val p = g.pathTo(r, at, dest.node) ?: if (at == dest.node) (intArrayOf(at) to IntArray(0)) else return
-                val allN = nodes + p.first.drop(1); val allE = es + p.second.toList()
-                if (allN.size != allN.toSet().size) return
-                val len = allE.sumOf { g.edges[it].length }
-                if (len < bestLen) { bestLen = len; best = allN.toIntArray() to allE.toIntArray() }
-                return
-            }
-            val e = g.edges[vias[k]]
-            if (e.idx == ban) return
-            for ((a, b) in listOf(e.a to e.b, e.b to e.a)) {
-                val r = g.search(at, ::cost, leafOk = a)
-                val p = (if (at == a) (intArrayOf(at) to IntArray(0)) else g.pathTo(r, at, a)) ?: continue
-                if (e.idx in p.second || b in nodes || b in p.first) continue
-                go(k + 1, b, nodes + p.first.drop(1) + b, es + p.second.toList() + e.idx)
-            }
-        }
-        if (vias.isEmpty()) return suggestRoutes(from, dest, 3, ban, bans)
-        go(0, from, listOf(from), emptyList())
-        val b = best ?: return emptyList()
-        return listOf(routeOf(b.first, b.second, dest, fastest = true))
-    }
-
-    /** Extend [route] with [opt]: walk on to the next junction, dead end or the destination node. */
-    fun applyRef(route: MutableList<Int>, opt: BuildOption, dest: Destination?) {
-        var edge = g.edges[opt.edge]; var node = route.last()
-        while (true) {
-            node = g.other(edge, node); route += node
-            if (dest != null && node == dest.node) return
-            val fwd = g.adj[node].filter { it != edge.idx && g.other(g.edges[it], node) !in route && !g.isLeaf(g.other(g.edges[it], node)) }
-            if (fwd.size != 1) return
-            edge = g.edges[fwd[0]]
-        }
+        return Route(nodes, es, compress(nodes, es), len, dest, fastest, g.geometry(nodes, es), es.any { g.edges[it].escortOnly })
     }
 
     fun edgesOf(nodes: List<Int>): IntArray = IntArray(nodes.size - 1) { g.edgeBetween(nodes[it], nodes[it + 1]) }
     fun compressNodes(nodes: List<Int>): List<String> =
         if (nodes.size < 2) emptyList() else compress(nodes.toIntArray(), edgesOf(nodes))
-}
-
-/** BUILD mode state: tap a ref chip, the route grows to the next junction; UNDO pops the last step. */
-class BuildSession(private val router: Router, start: Int, val dest: Destination, private val ban: Int = -1, private val bans: Set<Int> = emptySet(), private val startHeading: Double = Double.NaN) {
-    val nodes = ArrayList<Int>().apply { add(start) }
-    private val marks = ArrayList<Int>()
-    val current get() = nodes.last()
-    val complete get() = current == dest.node
-    fun options(): List<BuildOption> = if (complete) emptyList() else router.legalNextRefs(current, nodes, dest, ban, bans, startHeading)
-    fun apply(opt: BuildOption) { marks += nodes.size; router.applyRef(nodes, opt, dest) }
-    fun canUndo() = marks.isNotEmpty()
-    fun undo() { if (marks.isNotEmpty()) { val m = marks.removeAt(marks.size - 1); while (nodes.size > m) nodes.removeAt(nodes.size - 1) } }
-    fun refs(): List<String> = router.compressNodes(nodes)
-    fun route(): Route? = if (complete && nodes.size >= 2) router.routeOf(nodes.toIntArray(), router.edgesOf(nodes), dest) else null
-    /** Geometry of the partial route (x,y pairs). */
-    fun points(): DoubleArray = if (nodes.size >= 2) router.g.geometry(nodes.toIntArray(), router.edgesOf(nodes)) else doubleArrayOf(router.g.nx[nodes[0]], router.g.ny[nodes[0]])
 }

@@ -26,12 +26,15 @@ data class HoldPosition(override val aircraftId: Int) : Command
 data class Continue(override val aircraftId: Int) : Command
 data class LineUpAndWait(override val aircraftId: Int) : Command
 data class ClearedForTakeoff(override val aircraftId: Int) : Command
-data class ClearedToLand(override val aircraftId: Int) : Command
+/** [exitId] (a [io.github.aviato28.scopecreep.sim.RunwayExit] hold id) makes it "cleared to land, vacate via X". */
+data class ClearedToLand(override val aircraftId: Int, val exitId: String? = null) : Command
 data class GoAround(override val aircraftId: Int) : Command
 /** [exitIdx] indexes [Simulation.exitOptions]; -1 picks the default exit. */
-data class VacateVia(override val aircraftId: Int, val exitIdx: Int = -1) : Command
+data class VacateVia(override val aircraftId: Int, val exitIdx: Int = -1, val exitId: String? = null) : Command
 data class TaxiToStand(override val aircraftId: Int, val route: Route) : Command
 data class CrossRunway(override val aircraftId: Int) : Command
+/** Taxi behind a follow-me vehicle: for routes that use escort-only edges. Valid for REQUEST_TAXI and VACATED aircraft. */
+data class FollowMeTaxi(override val aircraftId: Int, val route: Route) : Command
 
 class RadioLine(val time: Double, val fromAtc: Boolean, val text: String, val warn: Boolean = false)
 
@@ -105,10 +108,15 @@ class Aircraft(
     /** Distance along the current path where the exit connector begins (rollout aims to be at exit speed there). */
     var exitAtS = Double.POSITIVE_INFINITY
     var exitLabel = ""
+    /** Exit the controller chose (changeable until passed); null = auto-pick. */
+    var exitPick: RunwayExit? = null
     var onRunway = false
     var goArounds = 0
     var lastRecall = 0.0
     var goAroundReason: GoAroundReason? = null
+
+    // ---- follow-me ----
+    var escort: FollowMe? = null
 
     // ---- crossings ----
     /** Path distances where a runway crossing node lies, the runway ids, and how many are cleared. */

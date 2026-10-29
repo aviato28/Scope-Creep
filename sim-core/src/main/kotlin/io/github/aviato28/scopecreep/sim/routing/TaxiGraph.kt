@@ -6,7 +6,7 @@ import kotlin.math.hypot
 
 class TEdge(
     val idx: Int, val id: String, val a: Int, val b: Int, val refs: List<String>, val kind: String,
-    val length: Double, val xs: DoubleArray, val ys: DoubleArray,
+    val length: Double, val xs: DoubleArray, val ys: DoubleArray, val escortOnly: Boolean = false,
 )
 
 class SearchResult(val dist: DoubleArray, val prevEdge: IntArray)
@@ -48,7 +48,7 @@ class TaxiGraph(val airport: Airport) {
                 runwayTouch[a] = true; runwayTouch[b] = true
                 continue
             }
-            val te = TEdge(edges.size, e.id, a, b, refs, e.kind, len, px.toDoubleArray(), py.toDoubleArray())
+            val te = TEdge(edges.size, e.id, a, b, refs, e.kind, len, px.toDoubleArray(), py.toDoubleArray(), e.escortOnly)
             edges += te; lists[a] += te.idx; lists[b] += te.idx
         }
         adj = Array(nodeId.size) { lists[it].toIntArray() }
@@ -74,6 +74,9 @@ class TaxiGraph(val airport: Airport) {
     }
     /** Which side of the runway the edge [ei] leaves crossing node [n] on (+1 / -1). */
     fun crossSide(ei: Int, n: Int): Int { val d = crossDir[n] ?: return 0; return sideOf(edges[ei], n, d[0], d[1]) }
+
+    /** True when [n] lies on a runway centreline edge. */
+    fun touchesRunway(n: Int) = runwayTouch[n]
 
     fun other(e: TEdge, n: Int) = if (e.a == n) e.b else e.a
 
