@@ -25,7 +25,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
         val z = cam.zoom; val w = cam.viewW; val h = cam.viewH; val d = density; val t = theme
         val inv = 1f / z
         // ---- world space: route previews
-        c.save(); c.translate(w / 2, h / 2); c.scale(z, -z); c.translate(-cam.cx, -cam.cy)
+        c.save(); c.translate(cam.ax, cam.ay); c.scale(z, -z); c.translate(-cam.cx, -cam.cy)
         if (g.hasDim1) { dash.color = t.routeDim; dash.strokeWidth = 3f * d * inv; c.drawPath(g.dimPath1, dash) }
         if (g.hasDim2) { dash.color = t.routeDim; dash.strokeWidth = 3f * d * inv; c.drawPath(g.dimPath2, dash) }
         if (g.hasSel) { line.color = t.selected; line.strokeWidth = 4f * d * inv; c.drawPath(g.selPath, line) }
@@ -39,7 +39,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
             line.color = t.departure; line.strokeWidth = 2f * d
             fill.color = (t.departure and 0x00FFFFFF) or 0x40000000
             for (dst in sim.destinations) {
-                val px = (dst.x.toFloat() - cam.cx) * z + w / 2; val py = h / 2 - (dst.y.toFloat() - cam.cy) * z
+                val px = (dst.x.toFloat() - cam.cx) * z + cam.ax; val py = cam.ay - (dst.y.toFloat() - cam.cy) * z
                 if (px < -40 || px > w + 40 || py < -40 || py > h + 40) continue
                 c.drawCircle(px, py, (9f + 9f * ph) * d, line)
                 c.drawCircle(px, py, 5f * d, fill)
@@ -51,7 +51,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
         // ---- aircraft (constant screen size)
         val al = sim.alpha
         for (a in sim.aircraft) {
-            val px = (a.interpX(al).toFloat() - cam.cx) * z + w / 2; val py = h / 2 - (a.interpY(al).toFloat() - cam.cy) * z
+            val px = (a.interpX(al).toFloat() - cam.cx) * z + cam.ax; val py = cam.ay - (a.interpY(al).toFloat() - cam.cy) * z
             if (px < -80 || px > w + 80 || py < -80 || py > h + 80) continue
             val sel = a.id == g.selectedId
             val col = if (sel) t.selected else t.departure

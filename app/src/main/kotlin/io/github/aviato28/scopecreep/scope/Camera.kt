@@ -2,47 +2,64 @@ package io.github.aviato28.scopecreep.scope
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.setValue
 
-/** World is metres, x east / y north. zoom = screen px per metre. Mutating bumps [version] to redraw. */
+/**
+ * World is metres, x east / y north. zoom = screen px per metre.
+ * (cx, cy) is the world point shown at the anchor (ax, ay) = centre of the visible rectangle (the canvas minus safe
+ * area and UI overlays), so the map stays put when overlays appear. Mutating bumps [version]; read it only in draw.
+ */
 class Camera(private val bounds: FloatArray /* minX, minY, maxX, maxY */) {
     var cx = (bounds[0] + bounds[2]) / 2; private set
     var cy = (bounds[1] + bounds[3]) / 2; private set
     var zoom = 0.1f; private set
     var viewW = 0f; private set
     var viewH = 0f; private set
+    var ax = 0f; private set
+    var ay = 0f; private set
     var fitZoom = 0.1f; private set
     var maxZoom = 3f; private set
     var version by mutableIntStateOf(0); private set
-    private var sized = false
+    private var fitted = false
+    private var l = 0f; private var t = 0f; private var r = 0f; private var b = 0f
 
-    fun setViewSize(w: Float, h: Float, density: Float) {
-        if (w <= 0f || h <= 0f || (w == viewW && h == viewH)) return
-        viewW = w; viewH = h
-        fitZoom = minOf(w / (bounds[2] - bounds[0]), h / (bounds[3] - bounds[1]))
-        maxZoom = 3.5f * density
-        if (!sized) { zoom = fitZoom; sized = true }
+    /** [left]..[bottom] are the px reserved by insets and overlays. Fits the airport into the rest on first call only. */
+    fun setViewport(w: Float, h: Float, left: Float, top: Float, right: Float, bottom: Float, density: Float) {
+        if (w <= 0f || h <= 0f) return
+        if (w == viewW && h == viewH && left == l && top == t && right == r && bottom == b) return
+        viewW = w; viewH = h; l = left; t = top; r = right; b = bottom
+        val vw = (w - left - right).coerceAtLeast(1f); val vh = (h - top - bottom).coerceAtLeast(1f)
+        ax = left + vw / 2; ay = top + vh / 2
+        fitZoom = minOf(vw / (bounds[2] - bounds[0]), vh / (bounds[3] - bounds[1]))
+        maxZoom = maxOf(fitZoom, 48f * density / 25f)  // 25 m across 48 dp
+        if (!fitted) { zoom = fitZoom; cx = (bounds[0] + bounds[2]) / 2; cy = (bounds[1] + bounds[3]) / 2; fitted = true }
+        else zoom = zoom.coerceIn(fitZoom, maxZoom)
         clamp(); version++
     }
 
-    fun panBy(dxPx: Float, dyPx: Float) { cx -= dxPx / zoom; cy += dyPx / zoom; clamp(); version++ }
-
-    /** Zoom by [factor] keeping the world point under screen (px,py) fixed. */
-    fun zoomAbout(px: Float, py: Float, factor: Float) {
-        val nz = (zoom * factor).coerceIn(fitZoom, maxZoom)
-        val wx = cx + (px - viewW / 2) / zoom
-        val wy = cy - (py - viewH / 2) / zoom
-        zoom = nz
-        cx = wx - (px - viewW / 2) / nz
-        cy = wy + (py - viewH / 2) / nz
+    /** One gesture step: zoom by [factor] about screen point (px,py), then pan by (dx,dy) px. Clamped every step. */
+    fun transform(px: Float, py: Float, dx: Float, dy: Float, factor: Float) {
+        if (viewW <= 0f) return
+        if (factor != 1f) {
+            val nz = (zoom * factor).coerceIn(fitZoom, maxZoom)
+            val wx = cx + (px - ax) / zoom; val wy = cy - (py - ay) / zoom
+            zoom = nz
+            cx = wx - (px - ax) / nz; cy = wy + (py - ay) / nz
+        }
+        cx -= dx / zoom; cy += dy / zoom
         clamp(); version++
     }
 
-    fun setZoomAbout(px: Float, py: Float, target: Float) = zoomAbout(px, py, target / zoom)
-
+    /** The airport edge may reach the anchor, no further. */
     private fun clamp() {
-        val hw = viewW / zoom / 2; val hh = viewH / zoom / 2
-        cx = if (hw * 2 >= bounds[2] - bounds[0]) (bounds[0] + bounds[2]) / 2 else cx.coerceIn(bounds[0] + hw, bounds[2] - hw)
-        cy = if (hh * 2 >= bounds[3] - bounds[1]) (bounds[1] + bounds[3]) / 2 else cy.coerceIn(bounds[1] + hh, bounds[3] - hh)
+        cx = cx.coerceIn(bounds[0], bounds[2]); cy = cy.coerceIn(bounds[1], bounds[3])
+    }
+
+    companion object {
+        fun saver(bounds: FloatArray) = Saver<Camera, List<Float>>(
+            save = { listOf(it.cx, it.cy, it.zoom) },
+            restore = { s -> Camera(bounds).apply { cx = s[0]; cy = s[1]; zoom = s[2]; fitted = true } },
+        )
     }
 }

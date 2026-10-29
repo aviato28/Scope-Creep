@@ -35,12 +35,35 @@ def parse_osm(d):
     return nodes, ways
 
 
+NATO = {w: w[0].upper() for w in (
+    "alpha alfa bravo charlie delta echo foxtrot golf hotel india juliet juliett kilo lima mike november oscar papa quebec "
+    "romeo sierra tango uniform victor whiskey xray x-ray yankee zulu").split()}
+PREFIX_RE = re.compile(r"^(taxi\s*lane|taxiway|twy)\s+", re.I)
+
+
 def norm_ref(r):
     if not r:
         return None
-    parts = [re.sub(r"^(taxi\s*lane|taxiway|twy)\s+", "", p.strip(), flags=re.I) for p in r.replace(",", ";").split(";")]
+    parts = [PREFIX_RE.sub("", p.strip()) for p in r.replace(",", ";").split(";")]
     parts = [p for p in parts if p]
     return ";".join(parts) or None
+
+
+def ref_from_name(name):
+    """Derive a ref from an aeroway name: 'Taxi Lane L1' -> 'L1', 'Hotel 01' -> 'H1'. None when it does not look like a ref."""
+    if not name:
+        return None
+    n = PREFIX_RE.sub("", name.strip()).strip()
+    m = re.fullmatch(r"([A-Za-z][A-Za-z-]*)\s*0*(\d+)?", n)
+    if not m:
+        return None
+    word, num = m.group(1), m.group(2)
+    letter = NATO.get(word.lower())
+    if letter:
+        return letter + (num or "")
+    if len(word) <= 2 and word.isalpha():  # already a ref like "L1" / "A"
+        return word.upper() + (num or "")
+    return None
 
 
 def dist_pt_seg(p, a, b):
@@ -166,8 +189,10 @@ def main():
             ref, kind = norm_ref(t.get("ref")), "runway"
             width = float(t["width"]) if re.fullmatch(r"[\d.]+", t.get("width", "")) else 45.0
         else:
-            ref = norm_ref(t.get("ref")); kind = ae
-            if t.get("ref", "").lower().startswith("taxi lane"):
+            ref = norm_ref(t.get("ref")); kind = ae; src = "osm"
+            if not ref:
+                ref = ref_from_name(t.get("name")); src = "name"
+            if re.match(r"taxi\s*lane", (t.get("ref") or t.get("name") or ""), re.I):
                 kind = "taxilane"
             width = float(t["width"]) if re.fullmatch(r"[\d.]+", t.get("width", "")) else DEF_WIDTH[kind]
         idx = [i for i, n in enumerate(nd) if n in rep]
@@ -183,7 +208,7 @@ def main():
             if k2 in seen:
                 dup += 1; continue
             seen.add(k2)
-            edges.append({"id": f"e-osm-{wid}-{seq}", "from": fa, "to": fb, "ref": ref, "refSource": "osm" if ref else None,
+            edges.append({"id": f"e-osm-{wid}-{seq}", "from": fa, "to": fb, "ref": ref, "refSource": (src if ae != "runway" else "osm") if ref else None,
                           "kind": kind, "widthM": width, "poly": [list(p) for p in poly]})
 
     # ---- attach requests: stands (lead-in) and dangling taxiway ends near runway

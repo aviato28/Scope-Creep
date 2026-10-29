@@ -15,7 +15,7 @@ jobs:
       - name: Install SDK packages
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
       - name: Test and build
-        run: ./gradlew :sim-core:test :app:assembleDirectDebug
+        run: ./gradlew :sim-core:test :app:assembleDirectDebug :app:assembleDirectPreview
       - name: Lint (non-blocking)
         continue-on-error: true
         run: ./gradlew :app:lintDirectDebug
@@ -23,3 +23,7 @@ jobs:
         with:
           name: scope-creep-debug-apk
           path: app/build/outputs/apk/direct/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scope-creep-preview-apk
+          path: app/build/outputs/apk/direct/preview/*.apk

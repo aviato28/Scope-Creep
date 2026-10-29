@@ -37,7 +37,25 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     var hasSel = false; var hasDim1 = false; var hasDim2 = false; var hasBuild = false
     val selected: Aircraft? get() = sim.find(selectedId)
 
+    // frame-time stats for the debug overlay
+    var fps = 0f; private set
+    var worstMs = 0f; private set
+    var fpsText = ""; private set
+    private var lastNanos = 0L; private var statStart = 0L; private var statFrames = 0; private var statWorst = 0L
+
+    private fun stats(nanos: Long) {
+        if (lastNanos != 0L) { val dt = nanos - lastNanos; if (dt > statWorst) statWorst = dt; statFrames++ }
+        lastNanos = nanos
+        if (statStart == 0L) statStart = nanos
+        if (nanos - statStart >= 500_000_000L) {
+            fps = statFrames * 1e9f / (nanos - statStart); worstMs = statWorst / 1e6f
+            fpsText = "%.0f fps  max %.0f ms".format(fps, worstMs)
+            statStart = nanos; statFrames = 0; statWorst = 0
+        }
+    }
+
     fun frame(nanos: Long) {
+        stats(nanos)
         nowNanos = nanos; timeSec = nanos / 1e9f
         sim.update()
         if (sim.revision != lastSimRev) {
@@ -139,16 +157,16 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         val al = sim.alpha
         var best = -1; var bd = radiusPx
         for (a in sim.aircraft) {
-            val sx = (a.interpX(al).toFloat() - cam.cx) * cam.zoom + cam.viewW / 2
-            val sy = cam.viewH / 2 - (a.interpY(al).toFloat() - cam.cy) * cam.zoom
+            val sx = (a.interpX(al).toFloat() - cam.cx) * cam.zoom + cam.ax
+            val sy = cam.ay - (a.interpY(al).toFloat() - cam.cy) * cam.zoom
             val d = hypot(sx - px, sy - py)
             if (d < bd) { bd = d; best = a.id }
         }
         if (best >= 0) { select(best); return }
         if (mode == Mode.DEST) {
             for (d in sim.destinations) {
-                val sx = (d.x.toFloat() - cam.cx) * cam.zoom + cam.viewW / 2
-                val sy = cam.viewH / 2 - (d.y.toFloat() - cam.cy) * cam.zoom
+                val sx = (d.x.toFloat() - cam.cx) * cam.zoom + cam.ax
+                val sy = cam.ay - (d.y.toFloat() - cam.cy) * cam.zoom
                 if (hypot(sx - px, sy - py) < radiusPx) { chooseDest(d); return }
             }
         }

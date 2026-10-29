@@ -21,6 +21,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("boolean", "SHOW_FPS", "false")
     }
 
     flavorDimensions += "distribution"
@@ -31,16 +32,29 @@ android {
     }
 
     buildTypes {
+        debug { buildConfigField("boolean", "SHOW_FPS", "true") }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+        }
+        // Release-grade performance (R8, not debuggable) signed with the debug key, installable beside the debug build.
+        create("preview") {
+            initWith(getByName("release"))
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".preview"
+            versionNameSuffix = "-preview"
+            matchingFallbacks += "release"
+            buildConfigField("boolean", "SHOW_FPS", "true")
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     lint { abortOnError = false }
 }
 

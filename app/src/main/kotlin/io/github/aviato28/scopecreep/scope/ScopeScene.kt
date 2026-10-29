@@ -19,6 +19,8 @@ class ScopeScene(val airport: Airport) {
     /** per runway end: x, y, outward dx, dy, with text */
     val rwyLabelXY: FloatArray; val rwyLabelText: Array<String>
     val bounds = FloatArray(4)
+    /** Typical (10th percentile) nearest-neighbour distance between stands, metres; drives stand-ref LOD. */
+    val standSpacing: Float
 
     init {
         val a = airport
@@ -100,6 +102,12 @@ class ScopeScene(val airport: Airport) {
         standXY = FloatArray(a.stands.size * 2) { i -> (if (i % 2 == 0) a.stands[i / 2].x else a.stands[i / 2].y).toFloat() }
         standRefs = Array(a.stands.size) { a.stands[it].ref }
         for (s in a.stands) grow(s.x.toFloat(), s.y.toFloat())
+        val nn = FloatArray(a.stands.size) { i ->
+            var best = Float.MAX_VALUE
+            for (j in a.stands.indices) if (j != i) best = minOf(best, hypot(standXY[2 * i] - standXY[2 * j], standXY[2 * i + 1] - standXY[2 * j + 1]))
+            best
+        }.also { it.sort() }
+        standSpacing = if (nn.isEmpty() || nn[0] == Float.MAX_VALUE) 40f else nn[(nn.size / 10)].coerceAtLeast(5f)
         val m = 150f
         bounds[0] = minX - m; bounds[1] = minY - m; bounds[2] = maxX + m; bounds[3] = maxY + m
     }

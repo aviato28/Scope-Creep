@@ -44,7 +44,7 @@ private fun Chip(t: ScopeTheme, text: String, sub: String? = null, hot: Boolean 
 fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     g.rev
     val a = g.selected ?: return
-    Row(modifier.fillMaxWidth().background(Color(t.bg).copy(alpha = 0.85f)).navigationBarsPadding().padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().background(Color(t.bg).copy(alpha = 0.85f)).padding(6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.width(96.dp)) {
             BasicText(a.callsign, style = TextStyle(Color(t.selected), 14.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
             BasicText(a.typeLine, style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))

@@ -14,7 +14,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -79,9 +87,12 @@ private fun ScopeApp() {
     }
     val game = remember(scene) { scene?.let { GameController(it) } }
     LaunchedEffect(game) { if (game != null) while (true) withFrameNanos { game.frame(it) } }
-    val bg = Color(theme.bg); val dim = Color(theme.dim); val txt = Color(theme.text)
-    Column(Modifier.fillMaxSize().background(bg)) {
-        StatusBar(scene, theme)
+    val bg = Color(theme.bg)
+    var credits by rememberSaveable { mutableStateOf(false) }
+    BackHandler(credits) { credits = false }
+    Box(Modifier.fillMaxSize().background(bg).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
+    Column(Modifier.fillMaxSize()) {
+        StatusBar(scene, theme) { credits = true }
         val wide = LocalConfiguration.current.screenWidthDp >= 840
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -99,19 +110,16 @@ private fun ScopeApp() {
                         style = TextStyle(Color(theme.hold), 10.sp, fontFamily = Mono, fontWeight = FontWeight.Bold),
                     )
                 }
-                BasicText(
-                    "© OpenStreetMap contributors",
-                    Modifier.align(Alignment.BottomEnd).padding(bottom = 80.dp, end = 8.dp),
-                    style = TextStyle(dim, 10.sp, fontFamily = Mono),
-                )
             }
             if (game != null) StripPanel(game, theme, wide)
         }
     }
+    if (credits) CreditsScreen(theme) { credits = false }
+    }
 }
 
 @Composable
-private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme) {
+private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, onInfo: () -> Unit) {
     val meta = scene?.airport?.meta
     val clock by produceState("--:--:--Z") {
         val f = DateTimeFormatter.ofPattern("HH:mm:ss'Z'")
@@ -120,15 +128,23 @@ private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme) {
     val title = meta?.name?.uppercase()?.removeSuffix(" INTERNATIONAL")?.replaceFirst(" ", " / ") ?: ""
     val st = TextStyle(Color(theme.text), 11.sp, fontFamily = Mono)
     Row(
-        Modifier.fillMaxWidth().background(Color(theme.panel)).statusBarsPadding().padding(horizontal = 14.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        Modifier.fillMaxWidth().background(Color(theme.panel)).padding(horizontal = 14.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             BasicText(meta?.icao ?: "----", style = st.copy(Color(theme.label), fontWeight = FontWeight.Bold))
             BasicText(title, style = st)
             BasicText("TWR GND", style = st)
         }
-        BasicText(clock, style = st)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            BasicText(clock, style = st)
+            // Visible box stays 28dp; the tap area is wider so it is easy to hit without growing the bar.
+            Box(Modifier.size(width = 48.dp, height = 36.dp).clickable(onClick = onInfo), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(28.dp).border(1.dp, Color(theme.dim)), contentAlignment = Alignment.Center) {
+                    BasicText("i", style = st.copy(Color(theme.dim), fontWeight = FontWeight.Bold))
+                }
+            }
+        }
     }
 }
 
