@@ -17,3 +17,4 @@ tools/airport-pipeline/cache/
 *.osm.xml
 osm-raw/
 __pycache__/
+.kotlin/
