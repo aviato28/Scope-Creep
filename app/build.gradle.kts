@@ -19,14 +19,26 @@ android {
         applicationId = "io.github.aviato28.scopecreep"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PversionName=1.2.3 -PversionCode=N; local builds are 0.0.0-dev / 1.
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("versionName") as String?) ?: "0.0.0-dev"
         buildConfigField("boolean", "SHOW_FPS", "false")
+    }
+
+    // Release key comes from the environment (CI secrets); absent locally, so builds fall back to the debug key.
+    val releaseKeystore = System.getenv("SIGNING_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (releaseKeystore != null) create("release") {
+            storeFile = file(releaseKeystore)
+            storePassword = System.getenv("SIGNING_STORE_PASSWORD")
+            keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+            keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+        }
     }
 
     flavorDimensions += "distribution"
     productFlavors {
-        // TODO(M5): the in-app updater and REQUEST_INSTALL_PACKAGES live in src/direct only; `play` never gets them.
+        // The in-app updater and REQUEST_INSTALL_PACKAGES live in src/direct only; `play` gets a no-op stub.
         create("direct") { dimension = "distribution" }
         create("play") { dimension = "distribution" }
     }
@@ -35,7 +47,9 @@ android {
         debug { buildConfigField("boolean", "SHOW_FPS", "true") }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
         // Release-grade performance (R8, not debuggable) signed with the debug key, installable beside the debug build.
         create("preview") {
@@ -55,6 +69,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true; buildConfig = true }
+    testOptions { unitTests.all { it.useJUnitPlatform() } }
     lint { abortOnError = false }
 }
 
@@ -91,5 +106,7 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.foundation)
+    testImplementation(libs.junit.jupiter)
+    testRuntimeOnly(libs.junit.platform.launcher)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -88,11 +89,14 @@ private fun ScopeApp() {
     val game = remember(scene) { scene?.let { GameController(it) } }
     LaunchedEffect(game) { if (game != null) while (true) withFrameNanos { game.frame(it) } }
     val bg = Color(theme.bg)
+    val updater = remember { io.github.aviato28.scopecreep.update.UpdateManager.get(context) }
+    val updateState by updater.state.collectAsState()
+    LaunchedEffect(Unit) { updater.autoCheck() }
     var credits by rememberSaveable { mutableStateOf(false) }
     BackHandler(credits) { credits = false }
     Box(Modifier.fillMaxSize().background(bg).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))) {
     Column(Modifier.fillMaxSize()) {
-        StatusBar(scene, theme) { credits = true }
+        StatusBar(scene, theme, updateState is io.github.aviato28.scopecreep.update.UpdateState.Available) { credits = true }
         val wide = LocalConfiguration.current.screenWidthDp >= 840
         Row(Modifier.fillMaxSize()) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -114,12 +118,12 @@ private fun ScopeApp() {
             if (game != null) StripPanel(game, theme, wide)
         }
     }
-    if (credits) CreditsScreen(theme) { credits = false }
+    if (credits) AboutScreen(theme, updater) { credits = false }
     }
 }
 
 @Composable
-private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, onInfo: () -> Unit) {
+private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, updateAvailable: Boolean, onInfo: () -> Unit) {
     val meta = scene?.airport?.meta
     val clock by produceState("--:--:--Z") {
         val f = DateTimeFormatter.ofPattern("HH:mm:ss'Z'")
@@ -137,6 +141,11 @@ private fun StatusBar(scene: ScopeScene?, theme: ScopeTheme, onInfo: () -> Unit)
             BasicText("TWR GND", style = st)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (updateAvailable) BasicText(
+                "UPDATE",
+                Modifier.border(1.dp, Color(theme.selected)).clickable(onClick = onInfo).padding(horizontal = 6.dp, vertical = 2.dp),
+                style = st.copy(Color(theme.selected), 10.sp, fontWeight = FontWeight.Bold),
+            )
             BasicText(clock, style = st)
             // Visible box stays 28dp; the tap area is wider so it is easy to hit without growing the bar.
             Box(Modifier.size(width = 48.dp, height = 36.dp).clickable(onClick = onInfo), contentAlignment = Alignment.Center) {
