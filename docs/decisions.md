@@ -14,6 +14,7 @@ Settled in Phase 0 conversation. Revisit only if you say so.
 | 9 | Visual themes | Two themes from day one, driven by colour/stroke tokens: **Phosphor** (mockup 01/03, default) and **Modern Surface** (mockup 02, setting). |
 | 10 | In-app updates | Must-have. "Check for updates" in Settings, plus an optional check at launch. Pulls signed APKs from GitHub Releases. Removed from the Play Store build flavour. |
 | 11 | Working mode | Opus plans and reviews; building is delegated to Sonnet/Haiku agents. Token-frugal throughout. |
+| 12 | Taxi input | **Tap-to-route; no drag in v1.** Tap aircraft, then tap a destination (runway hold point, stand, apron), then the game offers 1-3 suggested routes as chips (e.g. `C M A A1`) that you preview on the map and send with one tap. **BUILD** mode builds a custom route one junction at a time: after each tap, only the taxiways legal from that point are offered as chips (the maintainer's idea). Drag may come back later as a tablet option. |
 | 8 | Fidelity | Airports must be detailed: the full real taxiway network, not a simplified one. Early mockups use placeholder geometry; the real layout comes from the pipeline. |
 
 ## Consequences
@@ -29,3 +30,9 @@ Settled in Phase 0 conversation. Revisit only if you say so.
 - **Release pipeline:** a GitHub Actions workflow on tag `v*` builds, signs and attaches the APK and checksums.
 - **Channels:** `stable` by default; an opt-in `beta` uses pre-releases.
 - **Play Store:** Google Play forbids self-updating outside Play, so a `play` build flavour compiles the updater out.
+
+## Why tap-to-route over drag
+- **Dense networks:** VOBL already has 169 taxiway segments, and drag-snapping on a phone in that density misfires. A chip is always a 48dp target, whatever the map zoom.
+- **Fun:** the fun is in *choosing* the route and the sequence, not in tracing lines precisely. Suggested routes keep the pace up; BUILD mode is there when you want to outsmart traffic.
+- **Realism:** it mirrors how ATC actually issues taxi instructions: a list of taxiway designators, not a drawn line.
+- **Scaling:** it works the same on every airport and every screen size, and needs only a taxiway graph we must have anyway.
