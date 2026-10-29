@@ -21,6 +21,7 @@ Settled in Phase 0 conversation. Revisit only if you say so.
 | 16 | Tows and arrivals | Tugs never cross runways in v1. Arrivals get a VACATE VIA instruction. |
 | 17 | Branding | App icon: concept 2 **Hold Short** (`mockups/branding/icon-2-*`, background #0a0f0d) with a monochrome themed variant; the same mark on the splash screen; wordmark `SCOPE_CREEP / GROUND CONTROL`. |
 | 18 | 2D only | The game stays 2D. A 3D "tower view" was discussed and declined. |
+| 19 | Build cadence | Batch work into larger releases (several features each) to conserve tokens; no releases for small fixes unless blocking. |
 | 8 | Fidelity | Airports must be detailed: the full real taxiway network, not a simplified one. Early mockups use placeholder geometry; the real layout comes from the pipeline. |
 
 ## Consequences
