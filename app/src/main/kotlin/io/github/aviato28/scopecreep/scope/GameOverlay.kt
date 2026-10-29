@@ -34,6 +34,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
         c.save(); c.translate(cam.ax, cam.ay); c.scale(z, -z); c.translate(-cam.cx, -cam.cy)
         if (g.hasDim1) { dash.color = t.routeDim; dash.strokeWidth = 3f * d * inv; c.drawPath(g.dimPath1, dash) }
         if (g.hasDim2) { dash.color = t.routeDim; dash.strokeWidth = 3f * d * inv; c.drawPath(g.dimPath2, dash) }
+        if (g.hasVia) { dash.color = t.departure; dash.strokeWidth = 5f * d * inv; c.drawPath(g.viaPath, dash) }
         if (g.hasSel) { line.color = t.selected; line.strokeWidth = 4f * d * inv; c.drawPath(g.selPath, line) }
         if (g.hasBuild) { line.color = t.selected; line.strokeWidth = 4f * d * inv; c.drawPath(g.buildPath, line) }
         c.restore()

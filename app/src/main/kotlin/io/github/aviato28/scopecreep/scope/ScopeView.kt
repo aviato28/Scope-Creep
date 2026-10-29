@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import io.github.aviato28.scopecreep.BuildConfig
 import io.github.aviato28.scopecreep.game.GameController
+import io.github.aviato28.scopecreep.game.Mode
 import io.github.aviato28.scopecreep.theme.ScopeTheme
 import kotlin.math.abs
 import kotlinx.coroutines.FlowPreview
@@ -60,6 +61,7 @@ fun ScopeView(scene: ScopeScene, theme: ScopeTheme, game: GameController, modifi
     val layer = rememberGraphicsLayer().also { it.compositingStrategy = CompositingStrategy.Offscreen }
     val cache = remember(scene) { StaticCache() }
     val settle = remember { mutableIntStateOf(0) }
+    val seenFocus = remember { IntArray(1) }
     LaunchedEffect(camera) { snapshotFlow { camera.version }.debounce(120).collect { settle.intValue++ } }
     val fpsPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE; textAlign = Paint.Align.RIGHT; textSize = 9f * density }
@@ -79,6 +81,7 @@ fun ScopeView(scene: ScopeScene, theme: ScopeTheme, game: GameController, modifi
                 val slop = viewConfiguration.touchSlop
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    camera.gesture = true
                     var moving = false; var multi = false; var travel = Offset.Zero
                     do {
                         val ev = awaitPointerEvent()
@@ -91,12 +94,15 @@ fun ScopeView(scene: ScopeScene, theme: ScopeTheme, game: GameController, modifi
                             ev.changes.forEach { if (it.pressed) it.consume() }
                         }
                     } while (ev.changes.any { it.pressed })
+                    camera.gesture = false
                     // Plain tap: acted on at release, no double-tap wait.
                     if (!moving && !multi) game.tap(down.position.x, down.position.y, camera, 48f * density)
                 }
             },
     ) {
         game.frame           // game loop redraw: the only per-frame state read
+        if (game.focusRev != seenFocus[0]) { seenFocus[0] = game.focusRev; if (game.mode == Mode.BUILD) camera.focusOn(game.focus[0], game.focus[1], game.focus[2], game.focus[3]) }
+        camera.autoStep(System.nanoTime())
         camera.version       // camera changes redraw this scope only
         val st = settle.intValue
         val w = size.width.toInt(); val h = size.height.toInt()

@@ -12,8 +12,8 @@ sealed interface SimEvent {
 enum class GoAroundReason { COMMANDED, NO_CLEARANCE, RUNWAY_OCCUPIED, TAILWIND, CROSSWIND }
 
 data class GoAroundEvent(override val time: Double, val callsign: String, val reason: GoAroundReason) : SimEvent {
-    /** Automatic go-arounds caused by the controller (no clearance, occupied runway) are strikes. */
-    override val strike get() = reason == GoAroundReason.NO_CLEARANCE || reason == GoAroundReason.RUNWAY_OCCUPIED
+    /** Go-arounds caused by the controller (no clearance, occupied runway, cleared into a tailwind or crosswind beyond limits) are strikes. */
+    override val strike get() = reason != GoAroundReason.COMMANDED
 }
 data class LandedEvent(override val time: Double, val callsign: String, val runway: String) : SimEvent
 data class ArrivalParkedEvent(override val time: Double, val callsign: String, val stand: String) : SimEvent
@@ -30,3 +30,14 @@ data class JunctionConflictEvent(override val time: Double, val callsign: String
 data class WakeCautionEvent(override val time: Double, val callsign: String, val leader: String, val requiredS: Int, val actualS: Int) : SimEvent
 data class WindRefusalEvent(override val time: Double, val callsign: String, val runway: String, val crosswindKt: Int) : SimEvent
 data class RunwayChangeEvent(override val time: Double, val departures: String, val arrivals: String) : SimEvent
+
+enum class MovementKind { DEPARTURE, ARRIVAL, TOW }
+
+/**
+ * One completed movement (departure airborne, arrival parked), for scoring. [delayS] is the waiting beyond the grace period
+ * (already net of grace); [routeM]/[shortestM] the taxi route flown and the shortest possible; [warned] when a warning hit it.
+ */
+data class MovementEvent(
+    override val time: Double, val callsign: String, val kind: MovementKind,
+    val delayS: Double, val routeM: Double, val shortestM: Double, val warned: Boolean,
+) : SimEvent

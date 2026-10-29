@@ -23,6 +23,12 @@ class ScopeRenderer(private val scene: ScopeScene, private var theme: ScopeTheme
     private val holdLines = FloatArray(scene.holds.size)
     private val holdDimLines = FloatArray(scene.holdsDim.size)
 
+    private var hatchFx: DashPathEffect? = null; private var hatchInv = 0f
+    private fun hatch(inv: Float): DashPathEffect {
+        if (hatchFx == null || hatchInv != inv) { hatchInv = inv; hatchFx = DashPathEffect(floatArrayOf(4f * density * inv, 5f * density * inv), 0f) }
+        return hatchFx!!
+    }
+
     fun setTheme(t: ScopeTheme) { theme = t }
 
     /** World-space layers (geometry only, no text). Recorded into an offscreen layer by [ScopeView] and re-used while panning/zooming. */
@@ -39,12 +45,18 @@ class ScopeRenderer(private val scene: ScopeScene, private var theme: ScopeTheme
 
         // taxiway bands at real width, only once they are visible as areas
         stroke.color = t.taxiBand
-        if (23f * z >= 3f) { stroke.strokeWidth = 23f; c.drawPath(scene.taxiPath, stroke) }
-        if (35f * z >= 3f) { stroke.strokeWidth = 35f; c.drawPath(scene.widePath, stroke) }
-        // centrelines stroked by width category
-        stroke.color = t.laneLine; stroke.strokeWidth = t.laneStrokeDp * d * inv; c.drawPath(scene.lanePath, stroke)
-        stroke.color = t.taxiLine; stroke.strokeWidth = t.taxiStrokeDp * d * inv; c.drawPath(scene.taxiPath, stroke)
-        stroke.strokeWidth = t.wideStrokeDp * d * inv; c.drawPath(scene.widePath, stroke)
+        if (23f * z >= 3f) { stroke.strokeWidth = 23f; for (p in scene.taxiPaths) c.drawPath(p, stroke) }
+        if (35f * z >= 3f) { stroke.strokeWidth = 35f; for (p in scene.widePaths) c.drawPath(p, stroke) }
+        // closed taxiways: a dim band cut into hatch bars (dashes across a thick stroke) plus a dim centreline
+        stroke.color = (t.dim and 0x00FFFFFF) or 0x55000000; stroke.strokeCap = Paint.Cap.BUTT
+        stroke.pathEffect = hatch(inv); stroke.strokeWidth = 23f.coerceAtLeast(6f * d * inv); c.drawPath(scene.closedPath, stroke)
+        stroke.pathEffect = null; stroke.strokeWidth = 1f * d * inv; c.drawPath(scene.closedPath, stroke)
+        stroke.strokeCap = Paint.Cap.ROUND
+        // centrelines stroked by width category (never thinner than ~1.5 px on screen)
+        val minW = 1.5f * inv
+        stroke.color = t.laneLine; stroke.strokeWidth = maxOf(t.laneStrokeDp * d * inv, minW); for (p in scene.lanePaths) c.drawPath(p, stroke)
+        stroke.color = t.taxiLine; stroke.strokeWidth = maxOf(t.taxiStrokeDp * d * inv, minW); for (p in scene.taxiPaths) c.drawPath(p, stroke)
+        stroke.strokeWidth = maxOf(t.wideStrokeDp * d * inv, minW); for (p in scene.widePaths) c.drawPath(p, stroke)
 
         for (i in scene.runwayPaths.indices) {
             fill.color = t.runwayFill; c.drawPath(scene.runwayPaths[i], fill)
@@ -113,7 +125,7 @@ class ScopeRenderer(private val scene: ScopeScene, private var theme: ScopeTheme
         val level = z / d
         nPlaced = 0
         if (level >= 0.25f) {
-            text.textSize = 10.5f * d; text.color = t.label; labelBg.color = t.labelBg
+            text.textSize = 10.5f * d; text.color = t.label; labelBg.color = (t.labelBg and 0x00FFFFFF) or 0x66000000
             val tl = scene.taxiLabels
             for (k in tl.indices) {
                 val l = tl[k]

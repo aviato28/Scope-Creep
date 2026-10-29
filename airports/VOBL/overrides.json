@@ -1,6 +1,6 @@
 {
   "_source": "Checked against AAI eAIP VOBL charts (AD 2 VOBL 1-101 Aerodrome Chart and 1-301 Aircraft Parking/Docking Chart, both 27 NOV 2025; eAIP package AIRAC effective 29 OCT 2026)",
-  "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py; refs set here get refSource \"override\". Sections: holds {id:{ref|delete}}, edges {id:{ref,widthM}}, ways {osmWayId:{ref}}, stands {id:{ref}}, meta {elevationM,magneticVariationDeg,name}.",
+  "_comment": "Maintainer overrides, keyed by stable ids (see review/unnamed.md for H#/W# short ids). Applied last by tools/airport-pipeline/pipeline.py; refs set here get refSource \"override\". Sections: holds {id:{ref|delete}}, edges {id:{ref,widthM}}, ways {osmWayId:{ref}}, stands {id:{ref}}, meta {elevationM,magneticVariationDeg,name}. ways/edges also accept {\"closed\": true} (drawn hatched, never routed).",
   "schemaVersion": 1,
   "meta": {},
   "ways": {
@@ -48,6 +48,9 @@
     },
     "1175618550": {
       "ref": "N"
+    },
+    "837936024": {
+      "closed": true
     }
   },
   "edges": {},

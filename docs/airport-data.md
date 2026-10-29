@@ -240,7 +240,7 @@ Failure reports are plain text, one issue per line with the stable ID, so an age
   "stands": { "s-osm-11083491360": { "ref": "12" } } }
 ```
 
-Edge ids win over `ways` (an OSM way id renames every edge of that way). Overridden values get `refSource: "override"`. A generated hold ref follows its connector when the connector is renamed, unless the hold is itself overridden. Unknown ids (removed by an OSM update) are reported as warnings in `review/unresolved.txt` and stderr, never dropped silently. `status` and `approved*` cannot be overridden. `tools/airport-pipeline/review.py` writes `review/review.svg|png`, `north-runway-holds.png` and `unnamed.md` (short ids H#n/W#n mapped to stable ids).
+`{"closed": true}` on an `edges` or `ways` entry marks edges `closed`: drawn hatched/dim, never routed. Edge ids win over `ways` (an OSM way id renames every edge of that way). Overridden values get `refSource: "override"`. A generated hold ref follows its connector when the connector is renamed, unless the hold is itself overridden. Unknown ids (removed by an OSM update) are reported as warnings in `review/unresolved.txt` and stderr, never dropped silently. `status` and `approved*` cannot be overridden. `tools/airport-pipeline/review.py` writes `review/review.svg|png`, `north-runway-holds.png` and `unnamed.md` (short ids H#n/W#n mapped to stable ids).
 
 Notes are the maintainer's own words, not quoted chart text.
 

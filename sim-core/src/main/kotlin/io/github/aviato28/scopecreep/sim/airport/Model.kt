@@ -57,6 +57,8 @@ data class GraphEdge(
     val refSource: String? = null,
     /** Intermediate points for drawing, [[x,y],...], excluding the end nodes. */
     val shape: List<List<Double>> = emptyList(),
+    /** Closed taxiway (maintainer override): drawn hatched and dim, never routed. */
+    val closed: Boolean = false,
 )
 
 @Serializable data class Graph(val nodes: List<GraphNode>, val edges: List<GraphEdge>)

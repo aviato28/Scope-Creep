@@ -32,6 +32,7 @@ object GraphValidator {
         for (e in a.graph.edges) {
             val f = pos[e.from]; val t = pos[e.to]
             if (f == null || t == null) { missing += e.id; continue }
+            if (e.closed) continue
             if (e.from == e.to || (f.x == t.x && f.y == t.y && e.shape.isEmpty())) zero += e.id
             val ra = find(e.from); val rb = find(e.to)
             if (ra != rb) parent[ra] = rb

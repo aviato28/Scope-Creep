@@ -2,12 +2,8 @@ e-osm-1059165752-1: taxiway edge without ref (OSM and propagation)
 e-osm-1059165752-2: taxiway edge without ref (OSM and propagation)
 e-osm-1059165752-3.1: taxiway edge without ref (OSM and propagation)
 e-osm-1059165752-3.2: taxiway edge without ref (OSM and propagation)
-e-osm-1059165753-1: taxiway edge without ref (OSM and propagation)
-e-osm-1059165753-2: taxiway edge without ref (OSM and propagation)
 e-osm-1059165754-1: taxiway edge without ref (OSM and propagation)
 e-osm-1059165755-1: taxiway edge without ref (OSM and propagation)
-e-osm-1059165759-1: taxiway edge without ref (OSM and propagation)
-e-osm-1059165759-2: taxiway edge without ref (OSM and propagation)
 e-osm-1059165760-1: taxiway edge without ref (OSM and propagation)
 e-osm-1059165760-2: taxiway edge without ref (OSM and propagation)
 e-osm-1059165761-1: taxiway edge without ref (OSM and propagation)
@@ -114,15 +110,11 @@ e-osm-837936026-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936026-2: taxiway edge without ref (OSM and propagation)
 e-osm-837936028-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936028-2: taxiway edge without ref (OSM and propagation)
-e-osm-837936030-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936031-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936034-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936034-2: taxiway edge without ref (OSM and propagation)
 e-osm-837936035-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936035-2: taxiway edge without ref (OSM and propagation)
-e-osm-838283540-1: taxiway edge without ref (OSM and propagation)
-e-osm-838283540-2: taxiway edge without ref (OSM and propagation)
-e-osm-838283540-3: taxiway edge without ref (OSM and propagation)
 e-osm-838283541-1: taxiway edge without ref (OSM and propagation)
 e-osm-838283544-1: taxiway edge without ref (OSM and propagation)
 e-osm-838283545-1: taxiway edge without ref (OSM and propagation)
@@ -131,7 +123,6 @@ e-osm-838283548-1: taxiway edge without ref (OSM and propagation)
 e-osm-838283548-2: taxiway edge without ref (OSM and propagation)
 e-osm-838283549-1: taxiway edge without ref (OSM and propagation)
 e-osm-838283549-2: taxiway edge without ref (OSM and propagation)
-e-osm-838283550-1: taxiway edge without ref (OSM and propagation)
 e-osm-838283551-1.1: taxiway edge without ref (OSM and propagation)
 e-osm-838283551-1.2: taxiway edge without ref (OSM and propagation)
 e-osm-838283551-1.3: taxiway edge without ref (OSM and propagation)
@@ -151,14 +142,10 @@ e-osm-838283552-1: taxiway edge without ref (OSM and propagation)
 e-osm-838283553-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716329-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716330-1: taxiway edge without ref (OSM and propagation)
-e-osm-870716331-1: taxiway edge without ref (OSM and propagation)
-e-osm-870716331-2: taxiway edge without ref (OSM and propagation)
 e-osm-870716332-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716332-2: taxiway edge without ref (OSM and propagation)
 e-osm-870716333-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716333-2: taxiway edge without ref (OSM and propagation)
-e-osm-870716334-1: taxiway edge without ref (OSM and propagation)
-e-osm-870716334-2: taxiway edge without ref (OSM and propagation)
 e-osm-870716335-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716336-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716338-1: taxiway edge without ref (OSM and propagation)
@@ -166,22 +153,14 @@ e-osm-870716339-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716342-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716343-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716345-1: taxiway edge without ref (OSM and propagation)
-e-osm-870716358-1: taxiway edge without ref (OSM and propagation)
-e-osm-870716359-1: taxiway edge without ref (OSM and propagation)
-e-osm-870716360-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716361-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716361-2: taxiway edge without ref (OSM and propagation)
-e-osm-870716362-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716363-1: taxiway edge without ref (OSM and propagation)
 e-osm-870716363-2: taxiway edge without ref (OSM and propagation)
 e-osm-870716364-1: taxiway edge without ref (OSM and propagation)
-e-osm-979704889-1: taxiway edge without ref (OSM and propagation)
 e-osm-979704890-1: taxiway edge without ref (OSM and propagation)
-e-osm-979704892-1: taxiway edge without ref (OSM and propagation)
 e-osm-979704898-1: taxiway edge without ref (OSM and propagation)
 e-osm-979704899-1: taxiway edge without ref (OSM and propagation)
-e-osm-979704900-1: taxiway edge without ref (OSM and propagation)
-e-osm-979704900-2: taxiway edge without ref (OSM and propagation)
 e-osm-979704902-1: taxiway edge without ref (OSM and propagation)
 e-osm-979704903-1: taxiway edge without ref (OSM and propagation)
 h-gen-e-osm-1175618534-3: entry connector without taxiway ref, hold ref null
@@ -193,37 +172,10 @@ h-gen-e-osm-979704889-1: entry connector without taxiway ref, hold ref null
 h-gen-e-osm-979704892-1: entry connector without taxiway ref, hold ref null
 h-osm-14300164156: entry connector without taxiway ref, hold ref null
 h-osm-9731765297: entry connector without taxiway ref, hold ref null
-s-osm-11083520366: stand without ref
-s-osm-11083520367: stand without ref
-s-osm-11083520368: stand without ref
-s-osm-11083520369: stand without ref
-s-osm-11083520370: stand without ref
-s-osm-11083520371: stand without ref
-s-osm-11083520372: stand without ref
-s-osm-11083520373: stand without ref
-s-osm-11083520374: stand without ref
-s-osm-11083520375: stand without ref
-s-osm-11083520376: stand without ref
-s-osm-11083520377: stand without ref
-s-osm-11083520378: stand without ref
-s-osm-11083520379: stand without ref
-s-osm-11083520380: stand without ref
-s-osm-11083520381: stand without ref
-s-osm-11083520382: stand without ref
-s-osm-11083520383: stand without ref
-s-osm-11083520384: stand without ref
-s-osm-11083520385: stand without ref
 s-osm-11083520386: no taxiway within 120 m, stand not connected
-s-osm-11083520386: stand without ref
 s-osm-11083520387: no taxiway within 120 m, stand not connected
-s-osm-11083520387: stand without ref
-s-osm-11083520389: stand without ref
 s-osm-11083520390: no taxiway within 120 m, stand not connected
-s-osm-11083520390: stand without ref
 s-osm-11083520391: no taxiway within 120 m, stand not connected
-s-osm-11083520391: stand without ref
-s-osm-11083520392: stand without ref
-s-osm-11083520393: stand without ref
 s-osm-11639957553: no taxiway within 120 m, stand not connected
 s-osm-11639957554: no taxiway within 120 m, stand not connected
 s-osm-11639957555: no taxiway within 120 m, stand not connected
@@ -244,17 +196,4 @@ s-osm-746314773: no taxiway within 120 m, stand not connected
 s-osm-746314935: no taxiway within 120 m, stand not connected
 s-osm-746314950: no taxiway within 120 m, stand not connected
 s-osm-746314952: no taxiway within 120 m, stand not connected
-s-osm-7823673382: stand without ref
-s-osm-7823673383: stand without ref
-s-osm-7823673384: stand without ref
-s-osm-7823676585: stand without ref
-s-osm-7823676586: stand without ref
-s-osm-7823676587: stand without ref
-s-osm-7823676588: stand without ref
-s-osm-7823676589: stand without ref
-s-osm-7823676590: stand without ref
-s-osm-7823676591: stand without ref
-s-osm-7823676592: stand without ref
-s-osm-7823676593: stand without ref
-s-osm-8498864569: stand without ref
 s-osm-9731765232: stand without ref

@@ -62,12 +62,9 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                         Chip(t, label, accent = !hot) { g.instruct(k) }
                     }
                     val warnStyle = TextStyle(Color(t.warn), 11.sp, fontFamily = Mono, fontWeight = FontWeight.Bold)
-                    if ((a.state == AcState.HOLDING_SHORT || a.state == AcState.LINED_UP) && InstructionKind.TAKEOFF !in legal && !a.armedTakeoff)
-                        BasicText(if (a.windRefused) "CROSSWIND - UNABLE" else "RUNWAY OCCUPIED", Modifier.align(Alignment.CenterVertically), style = warnStyle)
-                    if (a.state == AcState.FINAL && !a.cleared && InstructionKind.CLEARED_TO_LAND !in legal)
-                        BasicText("RUNWAY NOT CLEAR", Modifier.align(Alignment.CenterVertically), style = warnStyle)
-                    if (a.state == AcState.HOLDING_XING && InstructionKind.CROSS_RUNWAY !in legal)
-                        BasicText("RUNWAY ACTIVE", Modifier.align(Alignment.CenterVertically), style = warnStyle)
+                    // say why the clearance (line up / takeoff / land / cross) is not on offer right now
+                    val why = g.sim.blockReason(a)
+                    if (why != null) BasicText(why, Modifier.align(Alignment.CenterVertically), style = warnStyle)
                 }
                 Mode.PUSH -> {
                     BasicText("PUSH", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
@@ -96,11 +93,13 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                     if (g.routes.isEmpty()) BasicText("NO ROUTE", style = TextStyle(Color(t.departure), 12.sp, fontFamily = Mono))
                     else Chip(t, "SEND", accent = true) { g.send() }
                     if (g.routes.isNotEmpty()) Chip(t, "BUILD") { g.startBuild() }
+                    if (g.hasVia) Chip(t, "CLEAR VIA") { g.clearVias() }
+                    else BasicText("TAP A TAXIWAY TO ROUTE VIA IT", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
                     Chip(t, "BACK") { g.back() }
                 }
                 Mode.BUILD -> {
                     val b = g.build
-                    for (o in g.buildOptions) Chip(t, o.ref, accent = true) { g.buildPick(o) }
+                    for (o in g.buildOptions) Chip(t, "${o.arrow} ${o.ref}", if (o.best) "TOWARDS DEST" else null, accent = true) { g.buildPick(o) }
                     if (b != null && b.complete) Chip(t, "SEND", hot = true) { g.send() }
                     Chip(t, "UNDO", b?.refs()?.joinToString(" ")?.takeIf { it.isNotEmpty() }) { g.undo() }
                     Chip(t, "BACK") { g.back() }
@@ -203,5 +202,18 @@ fun RunwaySheet(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier)
             }
         }
         BasicText("Aircraft already cleared keep their clearance. New arrivals use the new runway after about 2 minutes.", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+    }
+}
+
+/** First-shift hint, a one-liner under the top bar that disappears when the hints are skipped or the tutorial ends. */
+@Composable
+fun HintBanner(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
+    g.rev; g.secRev
+    val h = hintFor(g) ?: return
+    Row(modifier.background(Color(t.panel)).border(1.dp, Color(t.accent)).padding(start = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        BasicText(h, Modifier.padding(vertical = 6.dp), style = TextStyle(Color(t.accent), 12.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))
+        Box(Modifier.heightIn(min = 40.dp).clickable { g.skipHints() }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+            BasicText("SKIP", style = TextStyle(Color(t.dim), 10.sp, fontFamily = Mono))
+        }
     }
 }

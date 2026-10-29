@@ -17,15 +17,24 @@ enum class Mode { IDLE, DEST, ROUTES, BUILD, PUSH, EXIT }
 class GameController(
     val scene: ScopeScene, seed: Long = System.currentTimeMillis(),
     fleet: FleetDb = Fleet.default, profile: TrafficProfile = TrafficProfile.generic,
+    val gameMode: GameMode = GameMode.SHIFT, val tutorial: Boolean = false, config: SimConfig = Modes.config(gameMode, tutorial),
 ) {
     private var nowNanos = 0L
-    val sim = Simulation(scene.airport, seed, SimConfig(), SimClock { nowNanos }, fleet, profile).also {
+    val sim = Simulation(scene.airport, seed, config, SimClock { nowNanos }, fleet, profile).also {
         // start on the configuration the wind favours; from here on the player chooses (decision 20)
         it.setRunwayConfig(it.suggestedConfig(), silent = true)
     }
 
     /** The RWY sheet in the top bar. */
     var rwySheet by mutableStateOf(false)
+    /** Pause (clock stops; log and map stay readable) and end-of-shift flags. */
+    var paused by mutableStateOf(false); private set
+    var over by mutableStateOf(false); private set
+    /** Set by the app: the local best for this mode, shown in the briefing. */
+    var bestForMode = 0
+    var hintsOn by mutableStateOf(tutorial); private set
+    fun pause(p: Boolean) { paused = p; if (p) applySpeed(1); bump() }
+    fun skipHints() { hintsOn = false }
     fun toggleRwySheet() { rwySheet = !rwySheet }
     fun chooseConfig(c: RunwayConfig) { sim.setRunwayConfig(c); rwySheet = false; bump() }
 
@@ -62,6 +71,10 @@ class GameController(
     var previewText = ""; private set
 
     // preallocated map overlays, rebuilt only when the selection changes
+    /** Taxiway edges the player tapped as via-waypoints while choosing a route. */
+    val vias = ArrayList<Int>(); val viaPath = Path(); var hasVia = false
+    /** BUILD-mode camera focus (world rect); [focusRev] bumps when it changes so the view can ease towards it. */
+    val focus = FloatArray(4); var focusRev = 0; private set
     val selPath = Path(); val dimPath1 = Path(); val dimPath2 = Path(); val buildPath = Path()
     var hasSel = false; var hasDim1 = false; var hasDim2 = false; var hasBuild = false
     val selected: Aircraft? get() = sim.find(selectedId)
@@ -86,7 +99,9 @@ class GameController(
     fun frame(nanos: Long) {
         stats(nanos)
         nowNanos = nanos; timeSec = nanos / 1e9f
+        if (paused || over) { frame++; return }
         sim.update()
+        if (sim.shiftOver && !over) { over = true; reset(); selectedId = -1; applySpeed(1); bump(); frame++; return }
         if (sim.attention != lastAttention) { lastAttention = sim.attention; if (autoDrop && speed != 1) applySpeed(1) }
         var changed = false
         if (sim.revision != lastSimRev) {
@@ -120,7 +135,7 @@ class GameController(
         strips = sim.aircraft.sortedWith(compareBy<Aircraft>({ rank(it) }, { -(if (it.waitSince >= 0) t - it.waitSince else 0.0) }, { it.id }))
     }
 
-    private fun reset() { mode = Mode.IDLE; amend = false; dest = null; routes = emptyList(); build = null; buildOptions = emptyList(); previewText = ""; hasSel = false; hasDim1 = false; hasDim2 = false; hasBuild = false }
+    private fun reset() { vias.clear(); hasVia = false; mode = Mode.IDLE; amend = false; dest = null; routes = emptyList(); build = null; buildOptions = emptyList(); previewText = ""; hasSel = false; hasDim1 = false; hasDim2 = false; hasBuild = false }
 
     fun select(id: Int) { if (id != selectedId) { selectedId = id; reset() }; bump() }
     fun deselect() { selectedId = -1; reset(); bump() }
@@ -155,6 +170,7 @@ class GameController(
 
     fun chooseDest(d: Destination) {
         val a = selected ?: return
+        vias.clear(); hasVia = false
         dest = d; routes = if (amend) sim.suggestAmend(a, d) else sim.suggestRoutes(a, d); routeIdx = 0; mode = Mode.ROUTES
         rebuildRoutes(); bump()
     }
@@ -196,9 +212,58 @@ class GameController(
         val b = build ?: return
         buildOptions = b.options()
         fill(buildPath, b.points()); hasBuild = true
+        updateFocus(b)
         previewText = textFor(b.refs(), !b.complete)
         bump()
     }
+
+    /** World rect holding the current junction and the first stretch of every candidate segment. */
+    private fun updateFocus(b: BuildSession) {
+        val g = sim.graph
+        var x0 = g.nx[b.current].toFloat(); var y0 = g.ny[b.current].toFloat(); var x1 = x0; var y1 = y0
+        fun grow(x: Double, y: Double) { x0 = minOf(x0, x.toFloat()); x1 = maxOf(x1, x.toFloat()); y0 = minOf(y0, y.toFloat()); y1 = maxOf(y1, y.toFloat()) }
+        for (o in buildOptions) {
+            val e = g.edges[o.edge]; val fwd = e.a == b.current
+            var acc = 0.0; var px = g.nx[b.current]; var py = g.ny[b.current]
+            for (j in 1 until e.xs.size) {
+                val i = if (fwd) j else e.xs.size - 1 - j
+                acc += hypot(e.xs[i] - px, e.ys[i] - py); px = e.xs[i]; py = e.ys[i]
+                grow(px, py)
+                if (acc > 160.0) break
+            }
+        }
+        focus[0] = x0; focus[1] = y0; focus[2] = x1; focus[3] = y1; focusRev++
+    }
+
+    // ---- via-waypoints: tap a taxiway while choosing a route ------------------------------------
+    private fun edgeAt(wx: Double, wy: Double, maxM: Double): Int {
+        var best = -1; var bd = maxM
+        for (e in sim.graph.edges) {
+            if (sim.graph.isLeaf(e.a) || sim.graph.isLeaf(e.b)) continue
+            for (i in 1 until e.xs.size) {
+                val ax = e.xs[i - 1]; val ay = e.ys[i - 1]; val dx = e.xs[i] - ax; val dy = e.ys[i] - ay
+                val l2 = dx * dx + dy * dy
+                val t = if (l2 == 0.0) 0.0 else (((wx - ax) * dx + (wy - ay) * dy) / l2).coerceIn(0.0, 1.0)
+                val d = hypot(wx - ax - t * dx, wy - ay - t * dy)
+                if (d < bd) { bd = d; best = e.idx }
+            }
+        }
+        return best
+    }
+
+    private fun addVia(edge: Int) {
+        val a = selected ?: return; val d = dest ?: return
+        val had = vias.indexOf(edge)
+        if (had >= 0) vias.removeAt(had) else { if (vias.size >= 3) vias.removeAt(0); vias.add(edge) }
+        val r = if (vias.isEmpty()) (if (amend) sim.suggestAmend(a, d) else sim.suggestRoutes(a, d)) else if (amend) sim.suggestAmendVia(a, d, vias) else sim.suggestVia(a, d, vias)
+        if (r.isEmpty()) { vias.remove(edge); previewText = "NO ROUTE VIA THAT TAXIWAY"; bump(); return }
+        routes = r; routeIdx = 0
+        viaPath.rewind()
+        for (v in vias) { val e = sim.graph.edges[v]; for (i in e.xs.indices) if (i == 0) viaPath.moveTo(e.xs[i].toFloat(), e.ys[i].toFloat()) else viaPath.lineTo(e.xs[i].toFloat(), e.ys[i].toFloat()) }
+        hasVia = vias.isNotEmpty()
+        rebuildRoutes(); bump()
+    }
+    fun clearVias() { if (vias.isEmpty()) return; val a = selected; val d = dest; if (a == null || d == null) return; vias.clear(); hasVia = false; routes = if (amend) sim.suggestAmend(a, d) else sim.suggestRoutes(a, d); routeIdx = 0; rebuildRoutes(); bump() }
 
     private fun rebuildRoutes() {
         hasSel = false; hasDim1 = false; hasDim2 = false
@@ -236,6 +301,15 @@ class GameController(
                 val sx = (d.x.toFloat() - cam.cx) * cam.zoom + cam.ax
                 val sy = cam.ay - (d.y.toFloat() - cam.cy) * cam.zoom
                 if (hypot(sx - px, sy - py) < radiusPx) { chooseDest(d); return }
+            }
+        }
+        if (mode == Mode.ROUTES || mode == Mode.BUILD) {
+            val wx = (px - cam.ax) / cam.zoom + cam.cx; val wy = cam.cy - (py - cam.ay) / cam.zoom
+            val e = edgeAt(wx.toDouble(), wy.toDouble(), (radiusPx * 0.6f / cam.zoom).toDouble())
+            if (e >= 0) {
+                if (mode == Mode.BUILD) { buildOptions.firstOrNull { it.edge == e }?.let { buildPick(it) } }
+                else addVia(e)
+                return
             }
         }
         if (mode == Mode.IDLE) deselect()

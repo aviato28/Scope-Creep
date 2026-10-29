@@ -51,6 +51,37 @@ class Camera(private val bounds: FloatArray /* minX, minY, maxX, maxY: what the 
         clamp(); version++
     }
 
+    // ---- smooth auto-focus (BUILD mode): eases towards a target, yields to the player's gestures ----
+    private var tcx = 0f; private var tcy = 0f; private var tz = 0.1f
+    private var easing = false
+    /** True while a finger is down; a pending focus waits for it to lift. */
+    var gesture = false
+    private var lastNs = 0L
+
+    /** Ask the camera to show world rect (x0,y0)-(x1,y1) with a margin, at most [maxZoom], at least a 150 m span. */
+    fun focusOn(x0: Float, y0: Float, x1: Float, y1: Float) {
+        if (viewW <= 0f) return
+        val vw = (viewW - l - r).coerceAtLeast(1f); val vh = (viewH - t - b).coerceAtLeast(1f)
+        val sx = maxOf(x1 - x0, 150f) * 1.3f; val sy = maxOf(y1 - y0, 150f) * 1.3f
+        tz = minOf(vw / sx, vh / sy).coerceIn(fitZoom, maxZoom)
+        tcx = (x0 + x1) / 2; tcy = (y0 + y1) / 2
+        easing = true
+    }
+
+    /** Advance the ease by the time since the last call (draw clock, ns). Returns true while moving. Does nothing during a gesture. */
+    fun autoStep(nowNs: Long): Boolean {
+        val dt = if (lastNs == 0L) 0f else ((nowNs - lastNs) / 1e9f).coerceIn(0f, 0.1f)
+        lastNs = nowNs
+        if (!easing) return false
+        if (gesture) return false
+        val k = 1f - Math.exp((-6f * dt).toDouble()).toFloat()
+        cx += (tcx - cx) * k; cy += (tcy - cy) * k; zoom += (tz - zoom) * k
+        clamp()
+        if (Math.abs(tcx - cx) * zoom < 0.5f && Math.abs(tcy - cy) * zoom < 0.5f && Math.abs(tz / zoom - 1f) < 0.003f) easing = false
+        version++
+        return true
+    }
+
     /** The airport edge may reach the anchor, no further. */
     private fun clamp() {
         cx = cx.coerceIn(panBounds[0], panBounds[2]); cy = cy.coerceIn(panBounds[1], panBounds[3])

@@ -33,7 +33,7 @@ class TaxiGraph(val airport: Airport) {
         val rwSets = HashMap<String, MutableSet<Int>>()
         for (e in airport.graph.edges) {
             val a = idToNode[e.from] ?: continue; val b = idToNode[e.to] ?: continue
-            if (a == b) continue
+            if (a == b || e.closed) continue
             val px = ArrayList<Double>(); val py = ArrayList<Double>()
             px += nx[a]; py += ny[a]
             for (s in e.shape) { px += s[0]; py += s[1] }

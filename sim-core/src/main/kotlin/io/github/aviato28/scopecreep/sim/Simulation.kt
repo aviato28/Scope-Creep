@@ -97,7 +97,25 @@ class Simulation(
     val events = ArrayList<SimEvent>()
     private var eventsRead = 0
     fun pollEvents(): List<SimEvent> { if (eventsRead >= events.size) return emptyList(); val out = events.subList(eventsRead, events.size).toList(); eventsRead = events.size; return out }
-    private fun emit(e: SimEvent) { events += e }
+    private fun emit(e: SimEvent) { events += e; if (!shiftOver) score.on(e) }
+
+    // ---- scoring / shift ----
+    val score = ScoreKeeper(config)
+    /** Why the shift ended, or null while it runs: "TIME" (shift clock) or "STRIKES". */
+    var endReason: String? = null; private set
+    val shiftOver get() = endReason != null
+    /** Seconds left in a timed shift (0 when over); -1 in endless mode. */
+    val timeLeft get() = if (config.shiftSeconds <= 0.0) -1.0 else (config.shiftSeconds - time).coerceAtLeast(0.0)
+    private fun checkShiftEnd() {
+        if (endReason != null) return
+        if (score.failed) endReason = "STRIKES"
+        else if (config.shiftSeconds > 0.0 && time >= config.shiftSeconds) endReason = "TIME"
+        if (endReason != null) revision++
+    }
+    private fun warn(a: Aircraft) { a.warned = true }
+    private fun finishMovement(a: Aircraft, kind: MovementKind) {
+        emit(MovementEvent(time, a.callsign, kind, a.delayS, a.routeM, a.shortestM, a.warned))
+    }
 
     init {
         // starting configuration: the SimConfig runway ends (a hand-built airport may lack the arrival end)
@@ -154,6 +172,7 @@ class Simulation(
 
     private var nextSecond = 1.0
     fun step() {
+        if (shiftOver) return
         val dt = config.stepSeconds
         time += dt
         val pendArr = pendingArrEnd
@@ -181,6 +200,7 @@ class Simulation(
             while (k < pending.size) { val p = pending[k]; if (p.due <= time) { log += RadioLine(time, p.atc, p.text); revision++; pending.removeAt(k) } else k++ }
         }
         if (time >= nextSecond) { nextSecond = time + 1.0; secondly() }
+        checkShiftEnd()
     }
 
     // ---- wind & configuration ------------------------------------------------------------------
@@ -249,7 +269,19 @@ class Simulation(
     }
 
     fun suggestRoutes(a: Aircraft, dest: Destination): List<Route> = router.suggestRoutes(a.taxiNode, dest, bans = a.noEdges)
-    fun newBuild(a: Aircraft, dest: Destination) = BuildSession(router, a.taxiNode, dest, -1, a.noEdges)
+    fun newBuild(a: Aircraft, dest: Destination) = BuildSession(router, a.taxiNode, dest, -1, a.noEdges, a.heading)
+
+    /** Route to [dest] through the tapped taxiway edges [vias] (graph edge indices); the pathfinder fills the gaps. */
+    fun suggestVia(a: Aircraft, dest: Destination, vias: List<Int>): List<Route> =
+        router.viaRoutes(a.taxiNode, dest, vias, -1, a.noEdges)
+
+    /** As [suggestVia] for an amendment: the best of the aircraft's possible start nodes. */
+    fun suggestAmendVia(a: Aircraft, dest: Destination, vias: List<Int>): List<Route> {
+        val out = ArrayList<Route>()
+        for (st in amendStarts(a)) if (st.node != dest.node) out += router.viaRoutes(st.node, dest, vias, st.ban)
+        val r = out.minByOrNull { it.lengthM } ?: return emptyList()
+        return listOf(r)
+    }
 
     /** Pushback directions offered for [a] (derived from the stand lead-in's junction). */
     fun pushOptions(a: Aircraft): List<PushOption> = spots[a.spot].options
@@ -331,6 +363,17 @@ class Simulation(
         if (a.state != AcState.HOLDING_XING || a.xingDone >= a.xingRwy.size) return false
         val rwId = a.xingRwy[a.xingDone]
         return !runwayBusy(a, rwId, true) && !arrivalSoon(rwId, 70.0, clearedOnly = false)
+    }
+    /** Short reason why the next clearance is unavailable for [a] (for the action bar), or null. */
+    fun blockReason(a: Aircraft): String? = when (a.state) {
+        AcState.HOLDING_SHORT, AcState.LINED_UP -> if (a.armedTakeoff) null else if (a.windRefused) "CROSSWIND, UNABLE: CHANGE RUNWAY"
+            else if (a.state == AcState.LINED_UP || canLineUp(a) || canTakeoff(a)) null
+            else if (arrivalSoon(rid(a.destination!!.runway), 60.0)) "LANDING TRAFFIC: WAIT"
+            else if (aircraft.any { it !== a && it.state == AcState.LINED_UP && depRwy(it) == rid(a.destination!!.runway) }) "AIRCRAFT LINED UP: WAIT"
+            else "RUNWAY BUSY: WAIT"
+        AcState.FINAL -> if (a.cleared || canClearToLand(a)) null else "RUNWAY NOT CLEAR: WAIT OR GO AROUND"
+        AcState.HOLDING_XING -> if (canCross(a)) null else "RUNWAY ACTIVE: WAIT"
+        else -> null
     }
     fun crossingRunwayName(a: Aircraft): String = if (a.xingDone < a.xingRwy.size) rwName(a.xingRwy[a.xingDone]) else ""
     private fun rwName(id: String) = airport.runways.firstOrNull { it.id == id }?.ends?.joinToString("/") { it.designator } ?: id
@@ -421,7 +464,7 @@ class Simulation(
 
     fun newAmendBuild(a: Aircraft, dest: Destination, startNode: Int): BuildSession? {
         val st = amendStarts(a).firstOrNull { it.node == startNode } ?: return null
-        return BuildSession(router, st.node, dest, st.ban)
+        return BuildSession(router, st.node, dest, st.ban, emptySet(), a.heading)
     }
 
     fun find(id: Int): Aircraft? = aircraft.firstOrNull { it.id == id }
@@ -432,6 +475,12 @@ class Simulation(
         val spoken = if (r.refs.size > 1 && r.refs.last() == d.ref) r.refs.dropLast(1) else r.refs.filter { it != d.ref }
         return if (d.stand) (if (spoken.isEmpty()) "taxi to stand ${d.label}" else "taxi via ${spoken.joinToString(", ")}, stand ${d.label}")
         else (if (spoken.isEmpty()) "taxi to" else "taxi via ${spoken.joinToString(", ")},") + " holding point ${d.label} runway ${d.runway}"
+    }
+
+    private fun startRouteStats(a: Aircraft, r: Route) {
+        a.routeBase = 0.0; a.routeM = r.lengthM
+        val d = router.g.search(r.nodes[0], leafOk = r.destination.node).dist[r.destination.node]
+        a.shortestM = if (d.isFinite()) d else r.lengthM
     }
 
     /** Records where this route crosses runways (path distance of each crossing node) and node distances for junction checks. */
@@ -472,6 +521,7 @@ class Simulation(
                 val body = routeBody(r, d)
                 atc("${a.spoken}, $body."); pilot("${body.replaceFirstChar { it.uppercase() }}, ${a.spoken}.")
                 a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false; a.routeOffset = 0.0; a.preEdge = -1
+                startRouteStats(a, r)
                 a.instruction = "TAXI " + r.refs.joinToString(" ")
                 a.path = r.polyline; a.s = 0.0; a.pathDone = false; a.speed = 0.0
                 setRoute(a, r, 0.0)
@@ -484,6 +534,7 @@ class Simulation(
                 atc("${a.spoken}, $body."); pilot("${body.replaceFirstChar { it.uppercase() }}, ${a.spoken}.")
                 a.standDest = d
                 a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false; a.routeOffset = 0.0; a.preEdge = -1
+                startRouteStats(a, r)
                 a.instruction = "TAXI STAND ${d.label}"
                 a.path = r.polyline; a.s = 0.0; a.pathDone = false; a.speed = 0.0
                 setRoute(a, r, 0.0)
@@ -499,6 +550,8 @@ class Simulation(
                 val lead = hypot(r.pts[0] - a.x, r.pts[1] - a.y)
                 var pts = if (lead > 0.5) doubleArrayOf(a.x, a.y) + r.pts else r.pts
                 if (pts.size < 4) pts += doubleArrayOf(pts[0] + 0.1, pts[1])
+                a.routeBase += if (a.state == AcState.TAXIING || a.state == AcState.HOLDING_XING) a.s else 0.0
+                a.routeM = a.routeBase + lead + r.lengthM
                 a.preEdge = if (lead > 0.5) st.edge else -1; a.routeOffset = if (lead > 0.5) lead else 0.0
                 a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false
                 a.instruction = if (d.stand) "TAXI STAND ${d.label}" else "TAXI " + r.refs.joinToString(" ")
@@ -536,7 +589,7 @@ class Simulation(
                 if (xw > a.type.xwindKt) {
                     val kt = xw.roundToInt()
                     pilot("Unable, crosswind $kt knots exceeds our limit, request other runway, ${a.spoken}.")
-                    a.windRefused = true; emit(WindRefusalEvent(time, a.callsign, des, kt)); attention++
+                    a.windRefused = true; warn(a); emit(WindRefusalEvent(time, a.callsign, des, kt)); attention++
                     revision++; return true
                 }
                 pilot("Cleared for takeoff runway $des, ${a.spoken}.")
@@ -578,7 +631,7 @@ class Simulation(
         val got = (time - l.airborneAt).toInt()
         if (need > 0 && got < need) {
             log += RadioLine(time, true, "wake caution: ${a.callsign} behind ${l.callsign} (${l.wake.code}), $got s of $need s", warn = true)
-            emit(WakeCautionEvent(time, a.callsign, l.callsign, need, got)); attention++
+            emit(WakeCautionEvent(time, a.callsign, l.callsign, need, got)); warn(a); attention++
         }
     }
 
@@ -626,7 +679,7 @@ class Simulation(
                 GoAroundReason.COMMANDED -> "${a.spoken}, going around."
             })
         }
-        emit(GoAroundEvent(time, a.callsign, reason))
+        warn(a); emit(GoAroundEvent(time, a.callsign, reason))
         revision++
     }
 
@@ -645,6 +698,11 @@ class Simulation(
 
     private fun spawnArrival(re: Rejoin?) {
         val c = ctx(arrivalEnd)
+        // mixed mode: do not feed the runway a new arrival while a departure is lined up or rolling on it
+        if (runwayConfig.mixed && aircraft.any { (it.state == AcState.LINED_UP || it.state == AcState.TAKEOFF_ROLL) && it.destination?.runway == c.designator }) {
+            if (re == null) arrSpawnAt = time + config.spawnRetryS else rejoins += Rejoin(time + config.spawnRetryS, re.airline, re.number, re.type, re.other, re.standDest, re.goArounds)
+            return
+        }
         var lead = arrRng.range(config.finalLeadMin, config.finalLeadMax)
         // keep one-minute spacing on final
         for (b in aircraft) if (b.state == AcState.FINAL && b.rwyEnd == c.designator) lead = max(lead, etaToTouchdown(b) + 60.0)
@@ -674,7 +732,10 @@ class Simulation(
         call("$gnd, ${a.spoken}, established ILS runway ${c.designator}" + (if (tw > config.tailwindLimitKt) ", reports tailwind ${tw.roundToInt()} knots" else "") + ", request landing.")
         if (re == null) arrSpawnAt = time + arrInterval() * arrRng.range(1 - config.spawnJitter, 1 + config.spawnJitter)
     }
-    private fun arrInterval() = config.arrivalIntervalAt0 + (config.arrivalIntervalAt1 - config.arrivalIntervalAt0) * pressure.coerceIn(0.0, 1.0)
+    private fun arrInterval(): Double {
+        val base = config.arrivalIntervalAt0 + (config.arrivalIntervalAt1 - config.arrivalIntervalAt0) * pressure.coerceIn(0.0, 1.0)
+        return if (runwayConfig.mixed) maxOf(base, config.mixedArrivalIntervalS) else base
+    }
 
     private fun blockedExit(ex: RunwayExit, self: Aircraft): Boolean {
         for (b in aircraft) {
@@ -780,7 +841,7 @@ class Simulation(
                     a.state = AcState.AIRBORNE; a.airborneAt = time; a.instruction = "AIRBORNE"; departed++; revision++
                     val c = ctxOf(a)
                     lastDep[c.rw.id] = LastDep(a.callsign, a.type.wake, time)
-                    emit(DepartedEvent(time, a.callsign, c.designator))
+                    emit(DepartedEvent(time, a.callsign, c.designator)); finishMovement(a, MovementKind.DEPARTURE)
                 }
             }
             AcState.AIRBORNE -> {
@@ -805,7 +866,7 @@ class Simulation(
     }
 
     private fun landedParked(a: Aircraft) {
-        emit(ArrivalParkedEvent(time, a.callsign, a.standDest?.label ?: a.standRef)); revision++
+        emit(ArrivalParkedEvent(time, a.callsign, a.standDest?.label ?: a.standRef)); finishMovement(a, MovementKind.ARRIVAL); revision++
     }
 
     private fun finalUpdate(a: Aircraft, dt: Double) {
@@ -935,14 +996,14 @@ class Simulation(
                 revision++
                 if (a.conflictWith != 0 && a.id < a.conflictWith) {
                     val b = find(a.conflictWith) ?: continue
-                    log += RadioLine(time, true, "conflict: ${a.callsign} / ${b.callsign} head-on on ${refAt(a.x, a.y)}", warn = true); attention++
+                    log += RadioLine(time, true, "conflict: ${a.callsign} / ${b.callsign} head-on on ${refAt(a.x, a.y)}", warn = true); warn(a); warn(b); attention++
                 }
             }
             if (a.conflictWith != 0 && !a.headOnFlagged && a.conflictSince >= 0 && time - a.conflictSince >= config.headOnStrikeSeconds && a.id < a.conflictWith) {
                 val b = find(a.conflictWith) ?: continue
                 a.headOnFlagged = true; b.headOnFlagged = true
                 log += RadioLine(time, true, "deadlock: ${a.callsign} / ${b.callsign} head-on unresolved", warn = true); attention++; revision++
-                emit(HeadOnUnresolvedEvent(time, a.callsign, b.callsign))
+                warn(a); warn(b); emit(HeadOnUnresolvedEvent(time, a.callsign, b.callsign))
             }
         }
     }
@@ -1005,6 +1066,7 @@ class Simulation(
                 if (jWarned.add(key)) {
                     val both = abs(ea - eb) < 3.0
                     if (both) { log += RadioLine(time, true, "junction: ${a.callsign} / ${b.callsign} converging on ${refAt(graph.nx[a.jNode], graph.ny[a.jNode])}", warn = true); attention++; revision++ }
+                    if (both) { warn(later); warn(first) }
                     emit(JunctionConflictEvent(time, later.callsign, first.callsign, both))
                 }
             }
@@ -1041,7 +1103,7 @@ class Simulation(
                 val key = (min(a.id, b.id).toLong() shl 32) or max(a.id, b.id).toLong()
                 if (incursionPairs.add(key)) {
                     log += RadioLine(time, true, "RUNWAY INCURSION: ${a.callsign} / ${b.callsign} runway ${rwName(ra)}", warn = true); attention++; revision++
-                    emit(RunwayIncursionEvent(time, a.callsign, b.callsign, rwName(ra)))
+                    warn(a); warn(b); emit(RunwayIncursionEvent(time, a.callsign, b.callsign, rwName(ra)))
                 }
             }
         }
@@ -1063,6 +1125,7 @@ class Simulation(
         }
         val every = if (ws == AcState.VACATED) config.taxiInRecallSeconds else config.recallSeconds
         if (ws != a.waitState) {
+            if (a.waitState != null && a.waitSince >= 0) a.delayS += (time - a.waitSince - config.delayGraceS).coerceAtLeast(0.0)
             a.waitState = ws; a.waitSince = if (ws == null) -1.0 else time; a.recallAt = time + every
         } else if (ws != null && time >= a.recallAt) {
             a.recallAt += every

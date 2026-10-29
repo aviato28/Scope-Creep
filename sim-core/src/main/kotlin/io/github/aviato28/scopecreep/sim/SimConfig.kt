@@ -80,4 +80,21 @@ data class SimConfig(
 
     /** Holds farther than this (graph metres) from the runway are not offered as departure holds. */
     val maxHoldToRunwayM: Double = 700.0,
+
+    // ---- scoring (design.md section 7) ----
+    val basePointsDeparture: Int = 100, val basePointsArrival: Int = 100, val basePointsTow: Int = 60,
+    /** -1 per second beyond this grace per wait (request to clearance/route), capped at [delayPenaltyCap]. */
+    val delayGraceS: Double = 30.0, val delayPenaltyCap: Int = 50,
+    /** Efficiency bonus: full within [effFullRatio] x shortest, falling linearly to 0 at [effZeroRatio]. */
+    val efficiencyMax: Int = 20, val effFullRatio: Double = 1.1, val effZeroRatio: Double = 1.5,
+    val streakStep: Double = 0.1, val streakCap: Double = 2.0,
+    val strikePenalty: Int = 150, val maxStrikes: Int = 3,
+
+    // ---- shift flow ----
+    /** Shift length in seconds; 0 = endless (the default for a bare Simulation; the app sets 420 for Shift/Daily). */
+    val shiftSeconds: Double = 0.0,
+    /** When false (default for a bare Simulation, and the first-ever tutorial shift) strikes are counted but never end the shift. */
+    val strikesEndShift: Boolean = false,
+    /** In mixed mode (one runway for both) arrivals are at least this far apart, and never spawn while a departure is lined up or rolling. */
+    val mixedArrivalIntervalS: Double = 120.0,
 )

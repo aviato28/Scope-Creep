@@ -132,12 +132,14 @@ def apply_overrides(ov, edges, holds, stands_raw, warn, meta_ov, marks, rw_geo, 
     for wid, d in sorted(ov.get("ways", {}).items()):
         if wid not in ways_present: orphan.append("ways/" + wid); continue
         for e in edges:
-            if edge_way(e["id"]) == wid and e["id"] not in ov.get("edges", {}) and "ref" in d:
-                e["ref"], e["refSource"] = ref_of(d), "override"; n += 1
+            if edge_way(e["id"]) == wid and e["id"] not in ov.get("edges", {}):
+                if "ref" in d: e["ref"], e["refSource"] = ref_of(d), "override"; n += 1
+                if d.get("closed"): e["closed"] = True; n += 1
     for eid, d in sorted(ov.get("edges", {}).items()):
         if eid not in ebyid: orphan.append("edges/" + eid); continue
         if "ref" in d: ebyid[eid]["ref"], ebyid[eid]["refSource"] = ref_of(d), "override"; n += 1
         if "widthM" in d: ebyid[eid]["widthM"] = float(d["widthM"]); n += 1
+        if d.get("closed"): ebyid[eid]["closed"] = True; n += 1
     hbyid = {h["id"]: h for h in holds}
     for hid, d in sorted(ov.get("holds", {}).items()):
         if hid not in hbyid: orphan.append("holds/" + hid); continue
@@ -513,6 +515,7 @@ def main():
         o = {"id": e["id"], "from": e["from"], "to": e["to"], "ref": e["ref"], "kind": e["kind"], "widthM": e["widthM"],
              "maxCode": None, "oneWay": False}
         if e["refSource"]: o["refSource"] = e["refSource"]
+        if e.get("closed"): o["closed"] = True
         if len(e["poly"]) > 2: o["shape"] = [[round(x, 1), round(y, 1)] for x, y in e["poly"][1:-1]]
         gedges.append(o)
     for h in holds:

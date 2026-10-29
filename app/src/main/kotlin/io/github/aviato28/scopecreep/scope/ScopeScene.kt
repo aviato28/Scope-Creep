@@ -9,7 +9,13 @@ class TaxiLabel(val text: String, val x: Float, val y: Float)
 /** Immutable, pre-built drawing data for one airport. Built once off the UI thread; draw code never allocates. */
 class ScopeScene(val airport: Airport) {
     val apronPath = Path(); val buildingPath = Path()
-    val lanePath = Path(); val taxiPath = Path(); val widePath = Path()
+    /**
+     * Taxiway centrelines by width class, split into small chunks: one huge self-overlapping stroked path (800 edges with round
+     * caps and joins) can lose slivers in the GPU path renderer, which showed as random gaps in the markings.
+     */
+    val lanePaths = ArrayList<Path>(); val taxiPaths = ArrayList<Path>(); val widePaths = ArrayList<Path>()
+    /** Closed taxiways (override `closed`): drawn hatched and dim, never routed. */
+    val closedPath = Path()
     val runwayPaths: List<Path>; val runwayCenterPaths: List<Path>
     val runwayWidths: FloatArray
     /** per hold: x, y, nx, ny (unit normal to the taxiway) */
@@ -68,10 +74,18 @@ class ScopeScene(val airport: Airport) {
         val byRef = LinkedHashMap<String, MutableList<Cand>>()
         val leaving = HashMap<String, ArrayList<FloatArray>>()
         val incident = HashMap<String, FloatArray>()  // node -> direction of first taxi edge (unit)
+        val chunkCount = IntArray(3)
+        fun chunk(list: ArrayList<Path>, cat: Int): Path {
+            if (list.isEmpty() || chunkCount[cat] >= CHUNK_EDGES) { list += Path(); chunkCount[cat] = 0 }
+            chunkCount[cat]++; return list.last()
+        }
         for (e in a.graph.edges) {
             val f = pos[e.from] ?: continue; val t = pos[e.to] ?: continue
             if (e.kind == "runway") continue
-            val target = when { e.widthM <= 15.0 -> lanePath; e.widthM <= 25.0 -> taxiPath; else -> widePath }
+            val target = when {
+                e.closed -> closedPath
+                e.widthM <= 15.0 -> chunk(lanePaths, 0); e.widthM <= 25.0 -> chunk(taxiPaths, 1); else -> chunk(widePaths, 2)
+            }
             target.moveTo(f[0], f[1])
             var px = f[0]; var py = f[1]; var len = 0f
             var mx = f[0]; var my = f[1]
@@ -132,7 +146,7 @@ class ScopeScene(val airport: Airport) {
         panBounds[0] = minOf(bounds[0], pxMin); panBounds[1] = minOf(bounds[1], pyMin); panBounds[2] = maxOf(bounds[2], pxMax); panBounds[3] = maxOf(bounds[3], pyMax)
     }
 
-    private companion object { const val APPROACH_FIT_M = 700f; const val HANDOFF_M = 6500f }
+    private companion object { const val CHUNK_EDGES = 40; const val APPROACH_FIT_M = 700f; const val HANDOFF_M = 6500f }
 
     private fun unit(dx: Float, dy: Float): FloatArray { val l = hypot(dx, dy).coerceAtLeast(0.001f); return floatArrayOf(dx / l, dy / l) }
 

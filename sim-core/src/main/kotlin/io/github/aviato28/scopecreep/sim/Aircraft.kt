@@ -120,6 +120,12 @@ class Aircraft(
     /** Cumulative path distance of each route node (for junction conflicts). */
     var nodeS = DoubleArray(0)
 
+    // ---- scoring bookkeeping ----
+    /** Seconds waited on ATC beyond the grace period (summed over waits), taxi route flown / shortest, and whether a warning hit this movement. */
+    var delayS = 0.0
+    var routeM = 0.0; var routeBase = 0.0; var shortestM = 0.0
+    var warned = false
+
     // ---- conflicts / wind ----
     var conflictSince = -1.0
     var windRequested = false

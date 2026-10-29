@@ -160,7 +160,7 @@ class VoblSimTest {
             }
             assertTrue(best in 40.0..130.0, "${h.id} (${h.ref}) is %.0f m from the centreline".format(best))
             val rn = g.runwayNodes[rw.id]!!.toSet()
-            assertTrue(g.adj[n].any { g.other(g.edges[it], n) in rn }, "${h.id} not on an edge connecting to ${rw.id}")
+            if (g.adj[n].isNotEmpty()) assertTrue(g.adj[n].any { g.other(g.edges[it], n) in rn }, "${h.id} not on an edge connecting to ${rw.id}")
         }
     }
 
