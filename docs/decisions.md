@@ -23,6 +23,8 @@ Settled in Phase 0 conversation. Revisit only if you say so.
 | 18 | 2D only | The game stays 2D. A 3D "tower view" was discussed and declined. |
 | 19 | Build cadence | Batch work into larger releases (several features each) to conserve tokens; no releases for small fixes unless blocking. |
 | 20 | Runway in use | Chosen by the player, not hard-coded. A seeded, drifting wind drives it: tailwind (>~5 kt, tune) and per-type crosswind limits cause go-arounds, runway requests and refusals; wind-shift warnings precede runway changes. |
+| 21 | Taxi input v2 | Replaces chip-by-chip BUILD (supersedes part of 12): tap a destination, the full route is drawn at once (controller-style routing preferring straight/same taxiway), edit by tapping the map (via/avoid), UNDO, SEND. See mockup 07. |
+| 22 | Strip bay | Four sections: ARRIVALS, RUNWAY, TAXI, APRON, with counts and REQ badges (mockup 07). |
 | 8 | Fidelity | Airports must be detailed: the full real taxiway network, not a simplified one. Early mockups use placeholder geometry; the real layout comes from the pipeline. |
 
 ## Consequences
