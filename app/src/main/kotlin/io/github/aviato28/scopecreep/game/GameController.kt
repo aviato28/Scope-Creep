@@ -26,6 +26,8 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     var selectedId = -1; private set
     var mode = Mode.IDLE; private set
     var dest: Destination? = null; private set
+    var amend = false; private set
+    var destList: List<Destination> = emptyList(); private set
     var routes: List<Route> = emptyList(); private set
     var routeIdx = 0; private set
     var build: BuildSession? = null; private set
@@ -61,7 +63,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         if (sim.revision != lastSimRev) {
             lastSimRev = sim.revision
             val a = selected
-            if (a == null) { selectedId = -1; reset() } else if (mode != Mode.IDLE && a.state != AcState.REQUEST_TAXI) reset()
+            if (a == null) { selectedId = -1; reset() } else if (mode != Mode.IDLE && a.state != (if (amend) a.state.takeIf { it == AcState.TAXIING || it == AcState.HOLDING_SHORT } else AcState.REQUEST_TAXI)) reset()
             bump()
         }
         frame++
@@ -69,7 +71,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
 
     private fun bump() { rev++ }
 
-    private fun reset() { mode = Mode.IDLE; dest = null; routes = emptyList(); build = null; buildOptions = emptyList(); previewText = ""; hasSel = false; hasDim1 = false; hasDim2 = false; hasBuild = false }
+    private fun reset() { mode = Mode.IDLE; amend = false; dest = null; routes = emptyList(); build = null; buildOptions = emptyList(); previewText = ""; hasSel = false; hasDim1 = false; hasDim2 = false; hasBuild = false }
 
     fun select(id: Int) { if (id != selectedId) { selectedId = id; reset() }; bump() }
     fun deselect() { selectedId = -1; reset(); bump() }
@@ -78,7 +80,8 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         val a = selected ?: return
         when (k) {
             InstructionKind.PUSHBACK -> sim.submit(PushbackApproved(a.id))
-            InstructionKind.TAXI -> { mode = Mode.DEST }
+            InstructionKind.TAXI -> { amend = false; destList = sim.destinations; mode = Mode.DEST }
+            InstructionKind.AMEND_ROUTE -> { amend = true; destList = sim.amendDestinations(a); mode = Mode.DEST }
             InstructionKind.HOLD_POSITION -> sim.submit(HoldPosition(a.id))
             InstructionKind.CONTINUE -> sim.submit(Continue(a.id))
             InstructionKind.LINE_UP -> sim.submit(LineUpAndWait(a.id))
@@ -89,7 +92,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
 
     fun chooseDest(d: Destination) {
         val a = selected ?: return
-        dest = d; routes = sim.suggestRoutes(a, d); routeIdx = 0; mode = Mode.ROUTES
+        dest = d; routes = if (amend) sim.suggestAmend(a, d) else sim.suggestRoutes(a, d); routeIdx = 0; mode = Mode.ROUTES
         rebuildRoutes(); bump()
     }
 
@@ -98,12 +101,13 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
     fun send() {
         val a = selected ?: return
         val r = when (mode) { Mode.ROUTES -> routes.getOrNull(routeIdx); Mode.BUILD -> build?.route(); else -> null } ?: return
-        sim.submit(Taxi(a.id, r)); reset(); bump()
+        if (amend) sim.submit(AmendRoute(a.id, r)) else sim.submit(Taxi(a.id, r))
+        reset(); bump()
     }
 
     fun startBuild() {
         val a = selected ?: return; val d = dest ?: return
-        build = sim.newBuild(a, d); mode = Mode.BUILD; refreshBuild()
+        build = (if (amend) sim.newAmendBuild(a, d, routes.getOrNull(routeIdx)?.nodes?.get(0) ?: return) else sim.newBuild(a, d)) ?: return; mode = Mode.BUILD; refreshBuild()
     }
 
     fun buildPick(o: BuildOption) { build?.apply(o); refreshBuild() }
@@ -164,7 +168,7 @@ class GameController(val scene: ScopeScene, seed: Long = System.currentTimeMilli
         }
         if (best >= 0) { select(best); return }
         if (mode == Mode.DEST) {
-            for (d in sim.destinations) {
+            for (d in destList) {
                 val sx = (d.x.toFloat() - cam.cx) * cam.zoom + cam.ax
                 val sy = cam.ay - (d.y.toFloat() - cam.cy) * cam.zoom
                 if (hypot(sx - px, sy - py) < radiusPx) { chooseDest(d); return }

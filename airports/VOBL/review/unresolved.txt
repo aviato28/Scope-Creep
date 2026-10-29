@@ -86,6 +86,7 @@ e-osm-369336669-1: taxiway edge without ref (OSM and propagation)
 e-osm-369336669-2: taxiway edge without ref (OSM and propagation)
 e-osm-369336669-3: taxiway edge without ref (OSM and propagation)
 e-osm-369336677-1: taxiway edge without ref (OSM and propagation)
+e-osm-395510315-2: entry connector ends 25 m from the centreline of 758478003, no room for a hold
 e-osm-460265867-1: taxiway edge without ref (OSM and propagation)
 e-osm-460265868-1: taxiway edge without ref (OSM and propagation)
 e-osm-460265868-2: taxiway edge without ref (OSM and propagation)
@@ -95,6 +96,7 @@ e-osm-460265870-3: taxiway edge without ref (OSM and propagation)
 e-osm-60046898-1: taxiway edge without ref (OSM and propagation)
 e-osm-60046903-1: taxiway edge without ref (OSM and propagation)
 e-osm-60046912-1: taxiway edge without ref (OSM and propagation)
+e-osm-837936005-2: entry connector ends 25 m from the centreline of 758478003, no room for a hold
 e-osm-837936008-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936010-1: taxiway edge without ref (OSM and propagation)
 e-osm-837936010-2: taxiway edge without ref (OSM and propagation)
@@ -182,15 +184,15 @@ e-osm-979704900-1: taxiway edge without ref (OSM and propagation)
 e-osm-979704900-2: taxiway edge without ref (OSM and propagation)
 e-osm-979704902-1: taxiway edge without ref (OSM and propagation)
 e-osm-979704903-1: taxiway edge without ref (OSM and propagation)
-h-osm-14300164156: no taxiway ref at node, ref null
-h-osm-14300164161: duplicate hold ref A4 on rwy-osm-33494874
-h-osm-7482033308: duplicate hold ref A1 on rwy-osm-33494874
-h-osm-9063169524: duplicate hold ref H3 on rwy-osm-758478003
-h-osm-9063169525: duplicate hold ref H2 on rwy-osm-758478003
-h-osm-9063169526: duplicate hold ref H1 on rwy-osm-758478003
-h-osm-9063176037: duplicate hold ref H8 on rwy-osm-758478003
-h-osm-9731765248: no taxiway ref at node, ref null
-h-osm-9731765297: no taxiway ref at node, ref null
+h-gen-e-osm-1175618534-3: entry connector without taxiway ref, hold ref null
+h-gen-e-osm-1175618535-1: entry connector without taxiway ref, hold ref null
+h-gen-e-osm-837936024-1: entry connector without taxiway ref, hold ref null
+h-gen-e-osm-837936032-1: separate entry with the same ref as h-gen-e-osm-837936004-3 on rwy-osm-758478003, renamed H8-2
+h-gen-e-osm-870716357-1: separate entry with the same ref as h-gen-e-osm-137828023-1 on rwy-osm-33494874, renamed A4-2
+h-gen-e-osm-979704889-1: entry connector without taxiway ref, hold ref null
+h-gen-e-osm-979704892-1: entry connector without taxiway ref, hold ref null
+h-osm-14300164156: entry connector without taxiway ref, hold ref null
+h-osm-9731765297: entry connector without taxiway ref, hold ref null
 s-osm-11083520366: stand without ref
 s-osm-11083520367: stand without ref
 s-osm-11083520368: stand without ref

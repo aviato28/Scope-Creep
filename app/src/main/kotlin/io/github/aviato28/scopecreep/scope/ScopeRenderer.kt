@@ -21,6 +21,7 @@ class ScopeRenderer(private val scene: ScopeScene, private var theme: ScopeTheme
     private val rwyText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD); textAlign = Paint.Align.CENTER }
     private val labelBg = Paint().apply { style = Paint.Style.FILL }
     private val holdLines = FloatArray(scene.holds.size)
+    private val holdDimLines = FloatArray(scene.holdsDim.size)
 
     fun setTheme(t: ScopeTheme) { theme = t }
 
@@ -62,7 +63,16 @@ class ScopeRenderer(private val scene: ScopeScene, private var theme: ScopeTheme
             o += 4
         }
         stroke.color = t.hold; stroke.strokeWidth = t.holdStrokeDp * d * inv; stroke.strokeCap = Paint.Cap.BUTT
-        c.drawLines(holdLines, stroke); stroke.strokeCap = Paint.Cap.ROUND
+        c.drawLines(holdLines, stroke)
+        val hd = scene.holdsDim
+        o = 0
+        while (o < hd.size) {
+            holdDimLines[o] = hd[o] - hd[o + 2] * hl; holdDimLines[o + 1] = hd[o + 1] - hd[o + 3] * hl
+            holdDimLines[o + 2] = hd[o] + hd[o + 2] * hl; holdDimLines[o + 3] = hd[o + 1] + hd[o + 3] * hl
+            o += 4
+        }
+        stroke.color = (t.hold and 0x00FFFFFF) or 0x55000000
+        c.drawLines(holdDimLines, stroke); stroke.strokeCap = Paint.Cap.ROUND
 
         // stand dots
         if (z / d >= 0.15f) {

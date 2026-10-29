@@ -38,7 +38,7 @@ class GameOverlay(private val density: Float, private var theme: ScopeTheme) {
             val ph = (g.timeSec * 1.6f) % 1f
             line.color = t.departure; line.strokeWidth = 2f * d
             fill.color = (t.departure and 0x00FFFFFF) or 0x40000000
-            for (dst in sim.destinations) {
+            for (dst in g.destList) {
                 val px = (dst.x.toFloat() - cam.cx) * z + cam.ax; val py = cam.ay - (dst.y.toFloat() - cam.cy) * z
                 if (px < -40 || px > w + 40 || py < -40 || py > h + 40) continue
                 c.drawCircle(px, py, (9f + 9f * ph) * d, line)

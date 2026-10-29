@@ -6,13 +6,14 @@ import io.github.aviato28.scopecreep.sim.routing.Route
 enum class AcState { AT_STAND, REQUEST_PUSH, PUSHING, REQUEST_TAXI, TAXIING, HOLDING_SHORT, LINED_UP, TAKEOFF_ROLL, AIRBORNE }
 
 enum class InstructionKind(val label: String) {
-    PUSHBACK("PUSHBACK APPROVED"), TAXI("TAXI"), HOLD_POSITION("HOLD POSITION"), CONTINUE("CONTINUE"),
+    PUSHBACK("PUSHBACK APPROVED"), TAXI("TAXI"), HOLD_POSITION("HOLD POSITION"), CONTINUE("CONTINUE"), AMEND_ROUTE("AMEND ROUTE"),
     LINE_UP("LINE UP AND WAIT"), TAKEOFF("CLEARED FOR TAKEOFF"),
 }
 
 sealed interface Command { val aircraftId: Int }
 data class PushbackApproved(override val aircraftId: Int) : Command
 data class Taxi(override val aircraftId: Int, val route: Route) : Command
+data class AmendRoute(override val aircraftId: Int, val route: Route) : Command
 data class HoldPosition(override val aircraftId: Int) : Command
 data class Continue(override val aircraftId: Int) : Command
 data class LineUpAndWait(override val aircraftId: Int) : Command
@@ -43,6 +44,9 @@ class Aircraft(
     var pathDone = false
 
     var route: Route? = null
+    /** Length of the straight lead-in (aircraft position to route.nodes[0]) prepended by an amendment, and the edge it lies on. */
+    var routeOffset = 0.0
+    var preEdge = -1
     var destination: Destination? = null
     var faceHeading = Double.NaN
     var timer = 0.0

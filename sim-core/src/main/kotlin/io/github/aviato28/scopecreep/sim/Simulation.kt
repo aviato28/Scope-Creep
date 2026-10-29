@@ -68,7 +68,7 @@ class Simulation(
         val rwNodes = graph.runwayNodes[runway.id]?.toSet() ?: emptySet()
         val cands = ArrayList<Destination>()
         for (h in airport.holds) {
-            if (h.runway != runway.id) continue
+            if (h.runway != runway.id || h.type != "runway") continue
             val ref = h.ref ?: continue
             val n = graph.idToNode[h.node ?: continue] ?: continue
             val x = graph.nx[n]; val y = graph.ny[n]
@@ -135,14 +135,65 @@ class Simulation(
     fun legalInstructions(a: Aircraft): List<InstructionKind> = when (a.state) {
         AcState.REQUEST_PUSH -> listOf(InstructionKind.PUSHBACK)
         AcState.REQUEST_TAXI -> listOf(InstructionKind.TAXI)
-        AcState.TAXIING -> listOf(if (a.held) InstructionKind.CONTINUE else InstructionKind.HOLD_POSITION)
-        AcState.HOLDING_SHORT -> listOf(InstructionKind.LINE_UP, InstructionKind.TAKEOFF)
+        AcState.TAXIING -> listOf(if (a.held) InstructionKind.CONTINUE else InstructionKind.HOLD_POSITION, InstructionKind.AMEND_ROUTE)
+        AcState.HOLDING_SHORT -> listOf(InstructionKind.LINE_UP, InstructionKind.TAKEOFF, InstructionKind.AMEND_ROUTE)
         AcState.LINED_UP -> if (a.armedTakeoff) emptyList() else listOf(InstructionKind.TAKEOFF)
         else -> emptyList()
     }
 
     fun suggestRoutes(a: Aircraft, dest: Destination): List<Route> = router.suggestRoutes(a.taxiNode, dest)
     fun newBuild(a: Aircraft, dest: Destination) = BuildSession(router, a.taxiNode, dest)
+    /** A place an amended route may start: [edge] is the edge under the aircraft (-1 at a node), [ban] the edge a U-turn would use. */
+    class AmendStart(val node: Int, val edge: Int, val ban: Int)
+
+    /** Graph nodes an amended route may begin at: the next node ahead; either end of the current edge when stopped. */
+    fun amendStarts(a: Aircraft): List<AmendStart> {
+        if (a.state == AcState.HOLDING_SHORT) return listOfNotNull(a.destination?.let { AmendStart(it.node, -1, -1) })
+        val r = a.route ?: return emptyList()
+        if (a.state != AcState.TAXIING) return emptyList()
+        val stopped = a.held
+        val ls = a.s - a.routeOffset
+        fun onEdge(edge: Int, behind: Int, fwd: Int) =
+            if (stopped) listOf(AmendStart(fwd, edge, -1), AmendStart(behind, edge, -1)) else listOf(AmendStart(fwd, edge, edge))
+        if (ls < -0.3) { val fwd = r.nodes[0]; return onEdge(a.preEdge, graph.other(graph.edges[a.preEdge], fwd), fwd) }
+        var cum = 0.0
+        for (k in r.edges.indices) {
+            val len = graph.edges[r.edges[k]].length
+            if (ls <= cum + 0.5) { val arr = if (k > 0) r.edges[k - 1] else if (a.routeOffset > 0) a.preEdge else -1; return listOf(AmendStart(r.nodes[k], -1, if (stopped) -1 else arr)) }
+            if (ls < cum + len) return onEdge(r.edges[k], r.nodes[k], r.nodes[k + 1])
+            cum += len
+        }
+        return listOf(AmendStart(r.nodes.last(), -1, if (stopped || r.edges.isEmpty()) -1 else r.edges.last()))
+    }
+
+    /** Holds with a forward route from the aircraft's current position (a hold already passed is not offered). */
+    fun amendDestinations(a: Aircraft): List<Destination> {
+        val starts = amendStarts(a)
+        val reach = starts.map { st -> st to graph.search(st.node, { e -> if (e.idx == st.ban) Double.POSITIVE_INFINITY else e.length }).dist }
+        return destinations.filter { d -> reach.any { (st, dist) -> (st.node == d.node && a.state != AcState.HOLDING_SHORT) || (st.node != d.node && dist[d.node].isFinite()) } }
+    }
+
+    /** Up to 3 routes to [dest] starting at the aircraft's amend start(s), shortest first. */
+    fun suggestAmend(a: Aircraft, dest: Destination): List<Route> {
+        val found = ArrayList<Pair<Double, Route>>()
+        for (st in amendStarts(a)) {
+            val extra = hypot(graph.nx[st.node] - a.x, graph.ny[st.node] - a.y)
+            if (st.node == dest.node) {
+                if (a.state != AcState.HOLDING_SHORT) found += extra to Route(intArrayOf(st.node), IntArray(0), emptyList(), 0.0, dest, false, doubleArrayOf(graph.nx[st.node], graph.ny[st.node]))
+                continue
+            }
+            for (r in router.suggestRoutes(st.node, dest, 3, st.ban)) found += (r.lengthM + extra) to r
+        }
+        val out = ArrayList<Route>(); val seen = HashSet<Pair<List<String>, Int>>()
+        for ((_, r) in found.sortedBy { it.first }) { if (seen.add(r.refs to r.nodes[0]) && out.size < 3) out += Route(r.nodes, r.edges, r.refs, r.lengthM, r.destination, out.isEmpty(), r.pts) }
+        return out
+    }
+
+    fun newAmendBuild(a: Aircraft, dest: Destination, startNode: Int): BuildSession? {
+        val st = amendStarts(a).firstOrNull { it.node == startNode } ?: return null
+        return BuildSession(router, st.node, dest, st.ban)
+    }
+
     fun find(id: Int): Aircraft? = aircraft.firstOrNull { it.id == id }
 
     // ---- commands ----------------------------------------------------------------------------
@@ -165,9 +216,26 @@ class Simulation(
                 val spoken = if (r.refs.size > 1 && r.refs.last() == d.ref) r.refs.dropLast(1) else r.refs.filter { it != d.ref }
                 val body = (if (spoken.isEmpty()) "taxi to" else "taxi via ${spoken.joinToString(", ")},") + " holding point ${d.label} runway ${d.runway}"
                 atc("${a.spoken}, $body."); pilot("${body.replaceFirstChar { it.uppercase() }}, ${a.spoken}.")
-                a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false
+                a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false; a.routeOffset = 0.0; a.preEdge = -1
                 a.instruction = "TAXI " + r.refs.joinToString(" ")
                 a.path = r.polyline; a.s = 0.0; a.pathDone = false; a.speed = 0.0
+            }
+            is AmendRoute -> {
+                val r = cmd.route; val d = r.destination
+                if (a.state != AcState.TAXIING && a.state != AcState.HOLDING_SHORT) return false
+                val st = amendStarts(a).firstOrNull { it.node == r.nodes.firstOrNull() } ?: return false
+                if (destinations.none { it.node == d.node } || (r.edges.isNotEmpty() && r.edges[0] == st.ban)) return false
+                if (st.node == d.node && a.state == AcState.HOLDING_SHORT) return false
+                val spoken = if (r.refs.size > 1 && r.refs.last() == d.ref) r.refs.dropLast(1) else r.refs.filter { it != d.ref }
+                val body = (if (spoken.isEmpty()) "taxi to" else "taxi via ${spoken.joinToString(", ")},") + " holding point ${d.label} runway ${d.runway}"
+                atc("${a.spoken}, amend route, $body."); pilot("Amend route, $body, ${a.spoken}.")
+                val lead = hypot(r.pts[0] - a.x, r.pts[1] - a.y)
+                var pts = if (lead > 0.5) doubleArrayOf(a.x, a.y) + r.pts else r.pts
+                if (pts.size < 4) pts += doubleArrayOf(pts[0] + 0.1, pts[1])
+                a.preEdge = if (lead > 0.5) st.edge else -1; a.routeOffset = if (lead > 0.5) lead else 0.0
+                a.route = r; a.destination = d; a.state = AcState.TAXIING; a.held = false
+                a.instruction = "TAXI " + r.refs.joinToString(" ")
+                a.path = Polyline.flat(pts); a.s = 0.0; a.pathDone = false
             }
             is HoldPosition -> {
                 if (a.state != AcState.TAXIING || a.held) return false

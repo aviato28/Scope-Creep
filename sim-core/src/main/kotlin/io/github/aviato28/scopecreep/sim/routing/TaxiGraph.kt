@@ -71,6 +71,7 @@ class TaxiGraph(val airport: Airport) {
             val (d, u) = pq.poll()
             if (d > dist[u]) continue
             if (stop != null && stop(u)) break
+            if (u != src && runwayTouch[u]) continue // runway-entry nodes are terminal: no routing through the runway side
             for (ei in adj[u]) {
                 val e = edges[ei]; val v = other(e, u)
                 if (isLeaf(v) && v != leafOk) continue

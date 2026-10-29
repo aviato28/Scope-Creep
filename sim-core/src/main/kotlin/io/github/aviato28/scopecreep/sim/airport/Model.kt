@@ -69,6 +69,8 @@ data class Hold(
     val ref: String? = null,
     val category: String = "CAT1",
     val refGenerated: Boolean = false,
+    /** "runway": on a runway-entry connector (a destination); "intermediate": any other holding position. */
+    val type: String = "runway",
 )
 
 @Serializable

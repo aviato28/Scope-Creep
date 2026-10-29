@@ -12,6 +12,7 @@ R_EARTH = 6371008.8
 MERGE_TOL = 1.5        # m, merge near-duplicate key nodes
 SNAP_NODE = 4.0        # m, attach to an existing node instead of splitting an edge
 MAX_STAND_LEAD = 120.0 # m, stand lead-in search radius
+HOLD_MIN, HOLD_MAX, HOLD_GEN_M = 40.0, 130.0, 90.0  # m from runway centreline (decision 15)
 MAX_RWY_LINK = 25.0    # m, link dangling taxiway ends to the runway centreline
 DEF_WIDTH = {"taxiway": 23.0, "taxilane": 15.0}
 
@@ -327,35 +328,87 @@ def main():
                 e["ref"] = next(iter(sa)); e["refSource"] = "propagated"; changed = True
 
     # ---- holds
+    # A runway hold sits on each runway-entry connector (the taxi edge touching a runway centreline node), at
+    # HOLD_MIN..HOLD_MAX m from the centreline: the OSM holding_position node if it is the connector's far end and in
+    # range, else generated at HOLD_GEN_M by splitting the connector. Other OSM holding_position nodes are
+    # "intermediate" holds (no ref, not destinations).
     rw_geo = [(w, norm_ref(t.get("ref")), [P(n) for n in nd]) for w, nd, t in rwys]
-    inc = {}
+    rw_nodes = {}
     for e in edges:
-        inc.setdefault(e["from"], []).append(e); inc.setdefault(e["to"], []).append(e)
-    holds, used, hold_issues = [], {}, []
-    for h in sorted(hold_nodes, key=int):
-        if h not in rep:
-            hold_issues.append(f"h-osm-{h}: not on a taxiway way, skipped"); continue
-        node = nid(h); p = npos[node]
-        rw = min(rw_geo, key=lambda r: project_poly(p, r[2])[0])
-        tr = next((e["ref"] for e in inc.get(node, []) if e["kind"] != "runway" and e["ref"]), None)
-        if tr is None:  # fall back to the nearest reffed taxiway edge within 80 m
-            cand = [(project_poly(p, e["poly"])[0], e["ref"]) for e in edges if e["kind"] != "runway" and e["ref"]]
-            near = min(cand, default=(1e9, None))
-            tr = near[1] if near[0] <= 80 else None
-        if tr is None:
-            hold_issues.append(f"h-osm-{h}: no taxiway ref at node, ref null"); gen = None
-        elif re.search(r"\d$", tr.split(";")[0]):
-            gen = tr.split(";")[0]
+        if e["kind"] == "runway":
+            w = e["id"].split("-")[2]
+            rw_nodes.setdefault(w, set()).update((e["from"], e["to"]))
+    cdist = lambda w, q: project_poly(q, next(g[2] for g in rw_geo if g[0] == w))[0]
+    def toward(e, rn):  # poly oriented far end -> runway node
+        return e["poly"] if e["to"] in rn else e["poly"][::-1]
+    holds, used, hold_issues, osm_used = [], {}, [], set()
+    osm_by_node = {}
+    for h in hold_nodes:
+        if h in rep: osm_by_node.setdefault(nid(h), h)
+    entries = []
+    for e in list(edges):
+        if e["kind"] == "runway" or e.get("lead"):
+            continue
+        for w, rn in rw_nodes.items():
+            if (e["from"] in rn) != (e["to"] in rn):
+                entries.append((e, w, rn))
+    for e, w, rn in sorted(entries, key=lambda x: x[0]["id"]):
+        pl = toward(e, rn); far = tuple(pl[0]); df = cdist(w, far)
+        far_id = e["from"] if e["to"] in rn else e["to"]
+        if far_id in osm_by_node and HOLD_MIN <= df <= HOLD_MAX:
+            node = far_id; hid = "h-osm-" + osm_by_node[far_id]; osm_used.add(far_id)
+        elif df >= HOLD_GEN_M:
+            # walk from the runway end until the perpendicular distance reaches HOLD_GEN_M, then split there
+            lo_s, hi_s = 0.0, plen(pl); rev = pl[::-1]
+            for _ in range(40):
+                mid = (lo_s + hi_s) / 2
+                left, _r = split_poly(rev, mid)
+                if cdist(w, tuple(left[-1])) < HOLD_GEN_M: lo_s = mid
+                else: hi_s = mid
+            sp = hi_s; L = plen(pl)
+            if sp < SNAP_NODE or L - sp < SNAP_NODE:
+                hold_issues.append(f"{e['id']}: entry too short to split at {HOLD_GEN_M:.0f} m"); continue
+            far_part, rwy_part = split_poly(pl, L - sp)   # far->hold, hold->runway
+            q = (round(far_part[-1][0], 1), round(far_part[-1][1], 1))
+            node = "n-" + sha6(f"hold,{q[0]:.1f},{q[1]:.1f}"); npos[node] = q
+            hid = "h-gen-" + e["id"]
+            fp = [list(x) for x in far_part[:-1]] + [list(q)]
+            rp = [list(q)] + [list(x) for x in rwy_part[1:]]
+            if e["to"] in rn:   # stored far -> runway
+                e1 = {**e, "id": e["id"] + ".1", "to": node, "poly": fp}
+                e2 = {**e, "id": e["id"] + ".2", "from": node, "poly": rp}
+            else:               # stored runway -> far
+                e1 = {**e, "id": e["id"] + ".1", "to": node, "poly": rp[::-1]}
+                e2 = {**e, "id": e["id"] + ".2", "from": node, "poly": fp[::-1]}
+            edges.remove(e); edges += [e1, e2]
+            e = e1 if far_id == e1["from"] or far_id == e1["to"] else e2
+        elif df >= HOLD_MIN:
+            node = far_id; hid = "h-gen-" + e["id"]
         else:
-            n = used.get((rw[0], tr), 0) + 1; used[(rw[0], tr)] = n; gen = f"{tr.split(';')[0]}{n}"
-        holds.append({"id": "h-osm-" + h, "node": node, "runway": "rwy-osm-" + rw[0], "ref": gen,
-                      "refGenerated": True, "category": "CAT1"})
+            hold_issues.append(f"{e['id']}: entry connector ends {df:.0f} m from the centreline of {w}, no room for a hold"); continue
+        tr = (e["ref"] or "").split(";")[0] or None
+        if tr is None:
+            hold_issues.append(f"{hid}: entry connector without taxiway ref, hold ref null"); gen = None
+        elif re.search(r"\d$", tr):
+            gen = tr
+        else:
+            n = used.get((w, tr), 0) + 1; used[(w, tr)] = n; gen = f"{tr}{n}"
+        holds.append({"id": hid, "node": node, "runway": "rwy-osm-" + w, "ref": gen, "refGenerated": True,
+                      "category": "CAT1", "type": "runway"})
+    for n, h in sorted(osm_by_node.items(), key=lambda kv: int(kv[1])):
+        if n in osm_used: continue
+        p = npos[n]; w = min(rw_geo, key=lambda r: project_poly(p, r[2])[0])[0]
+        holds.append({"id": "h-osm-" + h, "node": n, "runway": "rwy-osm-" + w, "ref": None, "refGenerated": False,
+                      "category": "CAT1", "type": "intermediate"})
     seen_ref = {}
     for h in holds:
         k = (h["runway"], h["ref"])
-        if h["ref"] and k in seen_ref:
-            hold_issues.append(f"{h['id']}: duplicate hold ref {h['ref']} on {h['runway']}")
-        seen_ref[k] = 1
+        if h["ref"] and h["type"] == "runway" and k in seen_ref:
+            n = 2
+            while (h["runway"], f"{h['ref']}-{n}") in seen_ref: n += 1
+            hold_issues.append(f"{h['id']}: separate entry with the same ref as {seen_ref[k]} on {h['runway']}, renamed {h['ref']}-{n}")
+            h["ref"] = f"{h['ref']}-{n}"; k = (h["runway"], h["ref"])
+        seen_ref[k] = h["id"]
 
     # ---- runways
     runways = []

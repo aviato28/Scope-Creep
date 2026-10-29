@@ -19,7 +19,7 @@ class VoblAirportTest {
         assertEquals(2, a.runways.size)
         assertEquals(setOf("09L", "27R", "09R", "27L"), a.runways.flatMap { r -> r.ends.map { it.designator } }.toSet())
         assertEquals(194, a.stands.size)
-        assertEquals(26, a.holds.size)
+        assertEquals(44, a.holds.size); assertEquals(24, a.holds.count { it.type == "runway" })
         assertTrue(a.graph.nodes.size > 400 && a.graph.edges.size > 500, "graph too small")
         assertTrue(a.aprons.isNotEmpty() && a.buildings.isNotEmpty())
     }

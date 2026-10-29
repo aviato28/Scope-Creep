@@ -58,7 +58,8 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
                 }
                 Mode.DEST -> {
                     BasicText("TAXI TO", Modifier.align(Alignment.CenterVertically), style = TextStyle(Color(t.dim), 11.sp, fontFamily = Mono))
-                    for (d in g.sim.destinations) Chip(t, "${d.runway} - ${d.label}", "DEP RWY", accent = true) { g.chooseDest(d) }
+                    if (g.destList.isEmpty()) BasicText("NO HOLD AHEAD", style = TextStyle(Color(t.departure), 12.sp, fontFamily = Mono))
+                    for (d in g.destList) Chip(t, "${d.runway} - ${d.label}", "DEP RWY", accent = true) { g.chooseDest(d) }
                     Chip(t, "X") { g.back() }
                 }
                 Mode.ROUTES -> {
@@ -85,7 +86,7 @@ fun ActionBar(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
 @Composable
 fun PreviewBanner(g: GameController, t: ScopeTheme, modifier: Modifier = Modifier) {
     g.rev
-    val text = when (g.mode) { Mode.DEST -> "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
+    val text = when (g.mode) { Mode.DEST -> if (g.amend) "AMEND ROUTE: PICK A HOLD" else "TAXI: PICK A DESTINATION"; Mode.ROUTES, Mode.BUILD -> g.previewText; else -> "" }
     if (text.isEmpty()) return
     BasicText(text, modifier.background(Color(t.panel)).border(1.dp, Color(t.selected)).padding(horizontal = 10.dp, vertical = 5.dp),
         style = TextStyle(Color(t.selected), 13.sp, fontFamily = Mono, fontWeight = FontWeight.Bold))

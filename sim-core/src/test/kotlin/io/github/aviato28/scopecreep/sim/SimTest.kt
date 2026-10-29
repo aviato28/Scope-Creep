@@ -146,4 +146,102 @@ class VoblSimTest {
         val (t3, _) = run(6, 1500.0, stopAtAirborne = false)
         assertNotEquals(t1, t3)
     }
+    @Test fun `every runway hold is 40-130 m from its runway centreline on an entry connector`() {
+        val g = TaxiGraph(airport)
+        for (h in airport.holds.filter { it.type == "runway" }) {
+            val n = g.idToNode.getValue(h.node!!)
+            val rw = airport.runways.first { it.id == h.runway }
+            val cl = rw.centerline
+            var best = Double.MAX_VALUE
+            for (i in 0 until cl.size - 1) {
+                val ax = cl[i][0]; val ay = cl[i][1]; val dx = cl[i + 1][0] - ax; val dy = cl[i + 1][1] - ay
+                val t = (((g.nx[n] - ax) * dx + (g.ny[n] - ay) * dy) / (dx * dx + dy * dy)).coerceIn(0.0, 1.0)
+                best = minOf(best, Math.hypot(g.nx[n] - ax - t * dx, g.ny[n] - ay - t * dy))
+            }
+            assertTrue(best in 40.0..130.0, "${h.id} (${h.ref}) is %.0f m from the centreline".format(best))
+            val rn = g.runwayNodes[rw.id]!!.toSet()
+            assertTrue(g.adj[n].any { g.other(g.edges[it], n) in rn }, "${h.id} not on an edge connecting to ${rw.id}")
+        }
+    }
+
+    @Test fun `line up moves the aircraft onto the runway centreline`() {
+        val sim = Simulation(airport, 42)
+        var done = false; var t = 0.0
+        while (t < 900.0 && !done) {
+            sim.step(); t += sim.config.stepSeconds
+            for (a in sim.aircraft.toList()) when (a.state) {
+                AcState.REQUEST_PUSH -> sim.submit(PushbackApproved(a.id))
+                AcState.REQUEST_TAXI -> sim.submit(Taxi(a.id, sim.destinations.firstNotNullOf { d -> sim.suggestRoutes(a, d).firstOrNull() }))
+                AcState.HOLDING_SHORT -> sim.submit(LineUpAndWait(a.id))
+                AcState.LINED_UP -> if (a.pathDone && Polyline.angleDiff(a.heading, a.faceHeading) < 1.0) {
+                    val s = sim.runwayLine.project(a.x, a.y)
+                    val off = Math.hypot(a.x - sim.runwayLine.xAt(s), a.y - sim.runwayLine.yAt(s))
+                    assertTrue(off < 5.0, "lined up %.1f m off the centreline".format(off)); done = true
+                }
+                else -> {}
+            }
+        }
+        assertTrue(done)
+    }
+}
+
+class AmendTest {
+    private fun n(id: String, x: Double, y: Double) = GraphNode(id, x, y)
+    private fun e(id: String, a: String, b: String, ref: String?, kind: String = "taxiway") = GraphEdge(id, a, b, ref, kind, 23.0)
+    /** Taxiway A along y=80 with runway-entry connectors to the runway at y=0; holds A2 (x=200) and A4 (x=300) 40 m short of it. */
+    private val airport = Airport(
+        1, Meta("TEST", "Test Field", "draft", origin = LatLon(0.0, 0.0)),
+        runways = listOf(Runway("r1", listOf(RunwayEnd("09", Point(-500.0, 0.0), trueHeadingDeg = 90.0), RunwayEnd("27R", Point(500.0, 0.0), trueHeadingDeg = 270.0)), 45.0, 1000.0)),
+        graph = Graph(
+            listOf(n("S", 0.0, 100.0), n("N0", 0.0, 80.0), n("N1", 100.0, 80.0), n("N2", 200.0, 80.0), n("N3", 300.0, 80.0),
+                n("HA", 200.0, 40.0), n("HB", 300.0, 40.0), n("RA", 200.0, 0.0), n("RB", 300.0, 0.0)),
+            listOf(e("l", "S", "N0", null, "taxilane"), e("a1", "N0", "N1", "A"), e("a2", "N1", "N2", "A"), e("a3", "N2", "N3", "A"),
+                e("c2a", "N2", "HA", "A2"), e("c2b", "HA", "RA", "A2"), e("c4a", "N3", "HB", "A4"), e("c4b", "HB", "RB", "A4"),
+                GraphEdge("rw", "RA", "RB", "09/27R", "runway", 45.0)),
+        ),
+        holds = listOf(Hold("hA2", "HA", "r1", "A2"), Hold("hA4", "HB", "r1", "A4")),
+        stands = listOf(Stand("st", "1", "S", x = 0.0, y = 100.0)),
+    )
+    private val sim = Simulation(airport, 3, SimConfig(departureRunway = "27R"))
+    private fun dest(ref: String) = sim.destinations.first { it.ref == ref }
+
+    private fun taxiToA2(): Aircraft {
+        var t = 0
+        while (sim.aircraft.firstOrNull()?.state != AcState.REQUEST_TAXI && t++ < 5000) {
+            sim.step(); sim.aircraft.firstOrNull()?.let { if (it.state == AcState.REQUEST_PUSH) sim.submit(PushbackApproved(it.id)) }
+        }
+        val a = sim.aircraft.first(); assertEquals(AcState.REQUEST_TAXI, a.state)
+        assertTrue(sim.submit(Taxi(a.id, sim.suggestRoutes(a, dest("A2")).first())))
+        return a
+    }
+
+    @Test fun `amend mid-taxi to a reachable hold reaches it`() {
+        val a = taxiToA2()
+        while (a.x < 40.0) sim.step()
+        assertTrue(InstructionKind.AMEND_ROUTE in sim.legalInstructions(a))
+        assertEquals(setOf("A2", "A4"), sim.amendDestinations(a).map { it.ref }.toSet())
+        val r = sim.suggestAmend(a, dest("A4")).first()
+        assertTrue(sim.submit(AmendRoute(a.id, r)))
+        assertTrue(sim.log.any { it.text.contains("amend route") && it.text.contains("holding point A4") })
+        var t = 0
+        while (a.state != AcState.HOLDING_SHORT && t++ < 5000) sim.step()
+        assertEquals(AcState.HOLDING_SHORT, a.state); assertEquals("A4", a.destination?.label)
+        assertEquals(0.0, Math.hypot(a.x - 300.0, a.y - 40.0), 1.0)
+        // amending from the hold point to the other hold is allowed too
+        assertTrue(sim.amendDestinations(a).any { it.ref == "A2" })
+        assertTrue(sim.submit(AmendRoute(a.id, sim.suggestAmend(a, dest("A2")).first())))
+        t = 0; while (a.state != AcState.HOLDING_SHORT && t++ < 5000) sim.step()
+        assertEquals("A2", a.destination?.label)
+    }
+
+    @Test fun `a hold already passed is not offered`() {
+        val a = taxiToA2().also { sim.submit(AmendRoute(it.id, sim.suggestAmend(it, dest("A4")).first())) }
+        while (a.x < 230.0) sim.step()
+        assertEquals(listOf("A4"), sim.amendDestinations(a).map { it.ref })
+        assertTrue(sim.suggestAmend(a, dest("A2")).isEmpty())
+        // stopped: either end of the current edge is allowed, so A2 is reachable again
+        assertTrue(sim.submit(HoldPosition(a.id)))
+        var t = 0; while (a.speed > 0.0 && t++ < 500) sim.step()
+        assertEquals(setOf("A2", "A4"), sim.amendDestinations(a).map { it.ref }.toSet())
+    }
 }

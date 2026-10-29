@@ -14,6 +14,8 @@ class ScopeScene(val airport: Airport) {
     val runwayWidths: FloatArray
     /** per hold: x, y, nx, ny (unit normal to the taxiway) */
     val holds: FloatArray
+    /** same layout for intermediate holding positions (drawn dimmer) */
+    val holdsDim: FloatArray
     val standXY: FloatArray; val standRefs: Array<String?>
     val taxiLabels: Array<TaxiLabel>
     /** per runway end: x, y, outward dx, dy, with text */
@@ -55,6 +57,7 @@ class ScopeScene(val airport: Airport) {
         // taxiway edges, bucketed by width category; also per-ref label candidates
         class Cand(val x: Float, val y: Float, val len: Float)
         val byRef = LinkedHashMap<String, MutableList<Cand>>()
+        val leaving = HashMap<String, ArrayList<FloatArray>>()
         val incident = HashMap<String, FloatArray>()  // node -> direction of first taxi edge (unit)
         for (e in a.graph.edges) {
             val f = pos[e.from] ?: continue; val t = pos[e.to] ?: continue
@@ -74,6 +77,11 @@ class ScopeScene(val airport: Airport) {
                 if (acc + l >= len / 2 && l > 0) { val k = (len / 2 - acc) / l; mx = px + (q[0] - px) * k; my = py + (q[1] - py) * k; break }
                 acc += l; px = q[0]; py = q[1]
             }
+            run {
+                val after = pts.first(); val before = if (pts.size > 1) pts[pts.size - 2] else f
+                leaving.getOrPut(e.from) { ArrayList() } += unit(after[0] - f[0], after[1] - f[1])
+                leaving.getOrPut(e.to) { ArrayList() } += unit(before[0] - t[0], before[1] - t[1])
+            }
             if (e.kind != "taxilane" || e.ref != null) {
                 val after = pts.first(); val before = if (pts.size > 1) pts[pts.size - 2] else f
                 incident.getOrPut(e.from) { unit(after[0] - f[0], after[1] - f[1]) }
@@ -92,13 +100,15 @@ class ScopeScene(val airport: Airport) {
         }
         taxiLabels = labels.toTypedArray()
 
-        val h = ArrayList<Float>()
+        val h = ArrayList<Float>(); val hd2 = ArrayList<Float>()
         for (hd in a.holds) {
             val p = pos[hd.node ?: continue] ?: continue
-            val d = incident[hd.node] ?: floatArrayOf(1f, 0f)
-            h += listOf(p[0], p[1], -d[1], d[0])
+            val l = leaving[hd.node]
+            // tangent of the taxiway through the hold: two incident edges leave in opposite directions
+            val d = if (l != null && l.size == 2) unit(l[0][0] - l[1][0], l[0][1] - l[1][1]) else incident[hd.node] ?: floatArrayOf(1f, 0f)
+            (if (hd.type == "runway") h else hd2) += listOf(p[0], p[1], -d[1], d[0])
         }
-        holds = h.toFloatArray()
+        holds = h.toFloatArray(); holdsDim = hd2.toFloatArray()
         standXY = FloatArray(a.stands.size * 2) { i -> (if (i % 2 == 0) a.stands[i / 2].x else a.stands[i / 2].y).toFloat() }
         standRefs = Array(a.stands.size) { a.stands[it].ref }
         for (s in a.stands) grow(s.x.toFloat(), s.y.toFloat())
