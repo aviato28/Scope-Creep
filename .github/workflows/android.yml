@@ -11,10 +11,9 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
       - name: Install SDK packages
-        run: yes | sdkmanager "platforms;android-35" "build-tools;35.0.0" >/dev/null
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" >/dev/null
       - name: Test and build
         run: ./gradlew :sim-core:test :app:assembleDirectDebug
       - name: Lint (non-blocking)
